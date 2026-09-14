@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "name": "Astra",
+  "energy": 0.8,
+  "mood": 0.8,
+  "hunger": 0.2,
+  "trust": 0.5,
+  "personality": {
+    "curiosity": 0.7,
+    "playfulness": 0.7,
+    "laziness": 0.3
+  },
+  "memory": {
+    "times_played": 0,
+    "favorite_screen_area": "bottom-right"
+  }
+}
