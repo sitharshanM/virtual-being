@@ -1,4 +1,4 @@
-# ASTRA Desktop Life
+
 
 A planned Windows C++ virtual companion whose world is your desktop.
 
