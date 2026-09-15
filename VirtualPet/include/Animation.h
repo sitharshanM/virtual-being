@@ -5,12 +5,15 @@
 #include <vector>
 #include <unordered_map>
 #include <functional>
+#include <memory>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <objidl.h>
+#include <gdiplus.h>
 #endif
 
 namespace VirtualPet {
@@ -38,7 +41,7 @@ struct AnimationFrame {
     int32_t width{0};                   ///< Pixel width of frame.
     int32_t height{0};                  ///< Pixel height of frame.
 #ifdef _WIN32
-    HBITMAP hBitmap{nullptr};           ///< Cached Win32 bitmap handle if loaded.
+    std::shared_ptr<Gdiplus::Bitmap> bitmap; ///< Shared ownership of decoded image data.
 #endif
 };
 
@@ -49,7 +52,7 @@ public:
     explicit AnimationClip(std::string name, bool isLooping = true, float defaultFrameDuration = 0.1f);
 
     void AddFrame(const AnimationFrame& frame);
-    void AddFrame(const std::string& filePath, float durationSeconds = 0.1f);
+    void AddFrame(const std::string& filePath, float durationSeconds = -1.0f);
     void Clear();
 
     [[nodiscard]] const std::string& GetName() const noexcept { return m_name; }
@@ -67,6 +70,7 @@ private:
     std::vector<AnimationFrame> m_frames;
     bool m_isLooping{true};
     float m_totalDuration{0.0f};
+    float m_defaultFrameDuration{0.1f};
 };
 
 /// Callback invoked when a non-looping animation reaches its end.
@@ -83,8 +87,8 @@ public:
     // Non-copyable due to optional native image handles
     Animation(const Animation&) = delete;
     Animation& operator=(const Animation&) = delete;
-    Animation(Animation&&) noexcept = default;
-    Animation& operator=(Animation&&) noexcept = default;
+    Animation(Animation&&) = delete;
+    Animation& operator=(Animation&&) = delete;
 
     /// Advances playback timer and frame index based on elapsed seconds.
     void Update(float deltaTime);
@@ -130,6 +134,9 @@ public:
 #endif
 
 private:
+#ifdef _WIN32
+    ULONG_PTR m_gdiToken{0};
+#endif
     std::unordered_map<std::string, AnimationClip> m_clips;
     std::string m_currentClipName;
     AnimationState m_currentState{AnimationState::Idle};

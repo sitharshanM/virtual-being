@@ -34,7 +34,7 @@ void SystemSensor::PollSystemState() {
     lii.cbSize = sizeof(LASTINPUTINFO);
     if (::GetLastInputInfo(&lii)) {
         DWORD currentTicks = ::GetTickCount();
-        DWORD elapsedMs = (currentTicks >= lii.dwTime) ? (currentTicks - lii.dwTime) : 0;
+        DWORD elapsedMs = currentTicks - lii.dwTime;
         m_state.userIdleTimeSeconds = static_cast<float>(elapsedMs) / 1000.0f;
     }
     m_state.isUserIdle = (m_state.userIdleTimeSeconds >= m_idleThresholdSeconds);

@@ -1,58 +1,29 @@
 cmake_minimum_required(VERSION 3.15)
 project(VirtualPet LANGUAGES CXX)
-
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# Directory variables
-set(PET_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
-set(PET_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
-
-# Gather source and header files for main application
-file(GLOB_RECURSE PET_SOURCES "${PET_SRC_DIR}/*.cpp")
-file(GLOB_RECURSE PET_HEADERS "${PET_INCLUDE_DIR}/*.h")
-
-# Define the VirtualPet executable target
-add_executable(VirtualPet ${PET_SOURCES} ${PET_HEADERS})
-
-# Include headers from the include directory
-target_include_directories(VirtualPet PRIVATE ${PET_INCLUDE_DIR})
-
-# Link Windows libraries needed for desktop windowing, graphics, and sensors
+include(CTest)
+add_library(PetCore
+    src/Animation.cpp src/BehaviorTree.cpp src/DesktopWorld.cpp src/Memory.cpp
+    src/MouseSensor.cpp src/Pet.cpp src/PetBrain.cpp src/Physics.cpp
+    src/SaveManager.cpp src/SystemSensor.cpp)
+target_include_directories(PetCore PUBLIC include PRIVATE third_party)
 if(WIN32)
-    target_link_libraries(VirtualPet PRIVATE
-        user32
-        gdi32
-        msimg32
-        dwmapi
-        shell32
-    )
+    target_compile_definitions(PetCore PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(PetCore PUBLIC user32 gdi32 gdiplus shell32 advapi32)
 endif()
-
-# ============================================================================
-# Autonomous Unit Test Suite
-# ============================================================================
-
-set(TEST_SOURCES
-    tests/test_main.cpp
-    src/BehaviorTree.cpp
-    src/DesktopWorld.cpp
-    src/Memory.cpp
-    src/MouseSensor.cpp
-    src/Physics.cpp
-    src/SaveManager.cpp
-)
-
-add_executable(VirtualPetTests ${TEST_SOURCES})
-target_include_directories(VirtualPetTests PRIVATE ${PET_INCLUDE_DIR})
-
-if(WIN32)
-    target_link_libraries(VirtualPetTests PRIVATE
-        user32
-        gdi32
-        shell32
-    )
+if(MSVC)
+    target_compile_options(PetCore PRIVATE /W4)
+else()
+    target_compile_options(PetCore PRIVATE -Wall -Wextra -Wpedantic)
 endif()
-
-enable_testing()
-add_test(NAME CoreSubsystemsTest COMMAND VirtualPetTests)
+add_executable(VirtualPet WIN32 src/main.cpp)
+target_link_libraries(VirtualPet PRIVATE PetCore)
+add_custom_command(TARGET VirtualPet POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/config" "$<TARGET_FILE_DIR:VirtualPet>/config"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/assets" "$<TARGET_FILE_DIR:VirtualPet>/assets")
+if(BUILD_TESTING)
+    add_executable(VirtualPetTests tests/test_main.cpp)
+    target_link_libraries(VirtualPetTests PRIVATE PetCore)
+    add_test(NAME CoreSubsystemsTest COMMAND VirtualPetTests)
+endif()

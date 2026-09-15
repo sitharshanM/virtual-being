@@ -67,37 +67,38 @@ void Physics::SpawnToy(float x, float y, float vx, float vy, bool isTreat) noexc
 }
 
 void Physics::Update(float deltaTime, const DesktopWorld& world) {
-    if (deltaTime <= 0.0f) return;
+    if (!std::isfinite(deltaTime) || deltaTime <= 0.0f) return;
     const float dt = (std::min)(deltaTime, 0.05f);
 
     // 1. Step Toy/Treat Physics if active
     if (m_toy.active) {
+        const float oldToyY = m_toy.y;
         m_toy.vy += m_config.gravity * dt;
         m_toy.x += m_toy.vx * dt;
         m_toy.y += m_toy.vy * dt;
 
         int32_t toyX = static_cast<int32_t>(m_toy.x);
-        int32_t toyGroundY = world.GetSupportingSurfaceY(toyX, static_cast<int32_t>(m_toy.y),
-                                                         m_toy.radius * 2, m_toy.radius * 2, 0);
+        int32_t toyGroundY = world.GetSupportingSurfaceY(toyX - m_toy.radius, static_cast<int32_t>(oldToyY) - m_toy.radius,
+                                                         m_toy.radius * 2, m_toy.radius * 2, 0) + m_toy.radius;
 
-        if (m_toy.y >= static_cast<float>(toyGroundY)) {
+        if (m_toy.vy >= 0 && m_toy.y >= static_cast<float>(toyGroundY)) {
             m_toy.y = static_cast<float>(toyGroundY);
             if (m_toy.vy > 80.0f) {
                 m_toy.vy = -m_toy.vy * 0.5f; // Toy bounce
             } else {
                 m_toy.vy = 0.0f;
             }
-            m_toy.vx *= 0.90f;
+            m_toy.vx *= std::pow(0.90f, dt * 60.0f);
         }
 
         // Toy screen bounds check
         const MonitorInfo* mon = world.GetMonitorAt(Point(toyX, static_cast<int32_t>(m_toy.y)));
         Rect area = mon ? mon->workArea : world.GetPrimaryWorkArea();
-        if (m_toy.x < static_cast<float>(area.x)) {
-            m_toy.x = static_cast<float>(area.x);
+        if (m_toy.x < static_cast<float>(area.x + m_toy.radius)) {
+            m_toy.x = static_cast<float>(area.x + m_toy.radius);
             m_toy.vx = -m_toy.vx * 0.5f;
-        } else if (m_toy.x > static_cast<float>(area.x + area.width - m_toy.radius * 2)) {
-            m_toy.x = static_cast<float>(area.x + area.width - m_toy.radius * 2);
+        } else if (m_toy.x > static_cast<float>(area.x + area.width - m_toy.radius)) {
+            m_toy.x = static_cast<float>(area.x + area.width - m_toy.radius);
             m_toy.vx = -m_toy.vx * 0.5f;
         }
     }
@@ -127,15 +128,16 @@ void Physics::Update(float deltaTime, const DesktopWorld& world) {
     m_ax = 0.0f;
     m_ay = 0.0f;
 
+    const float oldY = m_y;
     m_x += m_vx * dt;
     m_y += m_vy * dt;
 
     // 4. Desktop Ground & Window Surfaces Collision
     int32_t currentX = static_cast<int32_t>(m_x);
     int32_t currentY = static_cast<int32_t>(m_y);
-    int32_t supportingY = world.GetSupportingSurfaceY(currentX, currentY, m_width, m_height, m_config.groundMargin);
+    int32_t supportingY = world.GetSupportingSurfaceY(currentX, static_cast<int32_t>(oldY), m_width, m_height, m_config.groundMargin);
 
-    if (m_y >= static_cast<float>(supportingY)) {
+    if (m_vy >= 0 && m_y >= static_cast<float>(supportingY)) {
         m_y = static_cast<float>(supportingY);
 
         if (m_vy > 180.0f) {
@@ -160,7 +162,7 @@ void Physics::Update(float deltaTime, const DesktopWorld& world) {
     Rect workArea = mon ? mon->workArea : world.GetPrimaryWorkArea();
 
     float minX = static_cast<float>(workArea.x);
-    float maxX = static_cast<float>(workArea.x + workArea.width - m_width);
+    float maxX = (std::max)(minX, static_cast<float>(workArea.x + workArea.width - m_width));
 
     if (m_x < minX) {
         m_x = minX;

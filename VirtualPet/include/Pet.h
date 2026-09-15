@@ -22,14 +22,19 @@ public:
     ~Pet();
 
     /// Initializes all sub-modules, loads configuration and saved state.
-    bool Init(const std::string& configPath = "config/pet_config.json",
-              const std::string& statePath = "data/pet_state.json");
+    bool Init(const std::string& configPath = "",
+              const std::string& statePath = "");
 
     /// Advances the pet simulation frame by deltaTime seconds.
     void Update(float deltaTime);
 
     /// Renders the current frame onto the window device context.
+#ifdef _WIN32
     void Render(HDC hdc);
+#endif
+    void RefreshDesktop() { m_desktopWorld.Refresh(); }
+    void CancelInteraction() { m_mouseSensor.CancelInteraction(); if (m_physics.IsDragged()) m_physics.StopDragging(); }
+
 
     /// Explicitly persists current pet state to disk.
     void SaveState();
@@ -69,6 +74,7 @@ public:
     [[nodiscard]] const PetBrain& GetBrain() const noexcept { return m_brain; }
 
 private:
+    void UpdateStep(float deltaTime);
     AppConfigData m_config;
     Animation m_animation;
     Physics m_physics;
@@ -79,6 +85,7 @@ private:
     SaveManager m_saveManager;
     PetBrain m_brain;
 
+    float m_worldTimer{0.0f};
     float m_autoSaveTimer{0.0f};
     float m_autoSaveInterval{30.0f};
 };

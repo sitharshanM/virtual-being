@@ -94,6 +94,7 @@ public:
 
     /// Reset transient frame states (click flags, deltas).
     void ResetFrameState();
+    void CancelInteraction() noexcept;
 
     // --- State Queries ---
 

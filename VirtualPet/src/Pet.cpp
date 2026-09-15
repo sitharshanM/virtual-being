@@ -1,4 +1,7 @@
 #include "Pet.h"
+#include <filesystem>
+#include <cmath>
+#include <iostream>
 
 namespace VirtualPet {
 
@@ -9,10 +12,30 @@ Pet::~Pet() {
 }
 
 bool Pet::Init(const std::string& configPath, const std::string& statePath) {
-    m_saveManager.SetFilePath(statePath);
-
-    // 1. Load application configuration
-    m_saveManager.LoadConfig(configPath, m_config);
+    namespace fs = std::filesystem;
+    fs::path base = fs::current_path();
+#ifdef _WIN32
+    wchar_t exe[32768]{};
+    DWORD length = GetModuleFileNameW(nullptr, exe, 32768);
+    if (length && length < 32768) base = fs::path(exe).parent_path();
+#endif
+    const fs::path configFile = configPath.empty() ? base / "config/pet_config.json" : fs::absolute(configPath);
+    m_saveManager.LoadConfig(configFile.string(), m_config);
+    const auto resourceRoot = configFile.parent_path().parent_path();
+    m_config.assetsDir = (resourceRoot / fs::path(m_config.assetsDir)).string();
+    fs::path dataRoot = base;
+#ifdef _WIN32
+    wchar_t localData[32768]{};
+    DWORD dataLength = GetEnvironmentVariableW(L"LOCALAPPDATA", localData, 32768);
+    if (dataLength && dataLength < 32768) dataRoot = fs::path(localData) / "VirtualPet";
+#endif
+    m_saveManager.SetFilePath(statePath.empty() ? (dataRoot / m_config.saveFile).string() : statePath);
+    m_brain.Configure(m_config.tickRateHz, m_config.idleTimeoutSeconds);
+    m_systemSensor.SetIdleThreshold(m_config.idleSystemThresholdSeconds);
+    MouseSensorConfig mouseConfig;
+    mouseConfig.proximityDistancePx = m_config.mouseProximityDistancePx;
+    mouseConfig.detectCursorDrag = m_config.detectCursorDrag;
+    m_mouseSensor.SetConfig(mouseConfig);
 
     // Apply configuration settings to subsystems
     PhysicsConfig pc;
@@ -48,13 +71,28 @@ bool Pet::Init(const std::string& configPath, const std::string& statePath) {
     Rect work = m_desktopWorld.GetPrimaryWorkArea();
     int32_t startX = work.x + work.width - m_physics.GetWidth() - 80;
     int32_t startY = m_desktopWorld.GetGroundY(startX, m_physics.GetHeight(), m_physics.GetConfig().groundMargin);
-    m_physics.SetPosition(static_cast<float>(startX), static_cast<float>(startY));
+    if (m_config.initialPosition == "bottom-left") startX = work.x + 30;
+    if (m_config.initialPosition == "center") { startX = work.x + (work.width-scaledW)/2; startY = work.y + (work.height-scaledH)/2; }
+    Point start = m_desktopWorld.ClampToWorkArea(Point(startX, startY), scaledW, scaledH);
+    m_physics.SetPosition(static_cast<float>(start.x), static_cast<float>(start.y));
 
     return true;
 }
 
 void Pet::Update(float deltaTime) {
-    if (deltaTime <= 0.0f) return;
+    if (!std::isfinite(deltaTime) || deltaTime <= 0.0f) return;
+    // Bound catch-up after suspension, but preserve ordinary low-FPS elapsed time.
+    float remaining = (std::min)(deltaTime, 1.0f);
+    while (remaining > 0.000001f) {
+        const float step = (std::min)(remaining, 0.05f);
+        UpdateStep(step);
+        remaining -= step;
+    }
+}
+
+void Pet::UpdateStep(float deltaTime) {
+    m_worldTimer += deltaTime;
+    if (m_worldTimer >= 0.5f) { m_desktopWorld.Refresh(); m_worldTimer = 0.0f; }
 
     Rect bounds = m_physics.GetBounds();
 
@@ -81,6 +119,7 @@ void Pet::Update(float deltaTime) {
                                             m_memory,
                                             m_desktopWorld,
                                             m_physics);
+    m_mouseSensor.ResetFrameState();
 
     // 5. Apply movement intent to physics
     if (!m_physics.IsDragged()) {
@@ -108,50 +147,36 @@ void Pet::Update(float deltaTime) {
     }
 }
 
+#ifdef _WIN32
 void Pet::Render(HDC hdc) {
-    // 1. Render pet sprite / silhouette
     m_animation.Render(hdc, 0, 0, m_physics.GetWidth(), m_physics.GetHeight());
-
-    // 2. Render toy or treat if positioned near the pet
-    const ToyItem& toy = m_physics.GetToy();
-    if (toy.active) {
-        Point pos = m_physics.GetPosition();
-        int32_t localX = static_cast<int32_t>(toy.x) - pos.x;
-        int32_t localY = static_cast<int32_t>(toy.y) - pos.y;
-
-        if (localX >= -30 && localX < m_physics.GetWidth() + 30 &&
-            localY >= -30 && localY < m_physics.GetHeight() + 30) {
-            HBRUSH brush = toy.isTreat ? ::CreateSolidBrush(RGB(180, 100, 40))
-                                       : ::CreateSolidBrush(RGB(220, 50, 50));
-            HGDIOBJ oldBrush = ::SelectObject(hdc, brush);
-            ::Ellipse(hdc, localX - toy.radius, localY - toy.radius,
-                           localX + toy.radius, localY + toy.radius);
-            ::SelectObject(hdc, oldBrush);
-            ::DeleteObject(brush);
-        }
-    }
 }
 
+#endif
 void Pet::SaveState() {
-    m_saveManager.Save(m_memory.GetData());
+    if (!m_saveManager.Save(m_memory.GetData())) std::cerr << "Unable to save pet state\n";
 }
 
 void Pet::Feed(float amount) {
     m_memory.Feed(amount);
+    m_brain.RequestAction(PetAction::ReactingToClick);
     m_animation.Play(AnimationState::Reaction, true);
 }
 
 void Pet::Play(float enjoyment) {
     m_memory.Play(enjoyment);
+    m_brain.RequestAction(PetAction::ReactingToClick);
     m_animation.Play(AnimationState::Reaction, true);
 }
 
 void Pet::Sleep() {
+    m_brain.RequestAction(PetAction::Sleeping);
     m_animation.Play(AnimationState::Sleep, true);
 }
 
 void Pet::InteractPet() {
     m_memory.Pet(0.1f);
+    m_brain.RequestAction(PetAction::ReactingToClick);
     m_animation.Play(AnimationState::Reaction, true);
 }
 

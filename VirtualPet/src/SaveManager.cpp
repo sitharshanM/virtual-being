@@ -3,7 +3,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
-#include <regex>
+#include <nlohmann/json.hpp>
+#include <cmath>
 #include <sstream>
 
 #ifdef _WIN32
@@ -33,9 +34,13 @@ AppConfigData SaveManager::GetDefaultConfig() noexcept {
 }
 
 bool SaveManager::Validate(const PetStateData& data) const noexcept {
-    if (data.version <= 0 || data.name.empty()) {
+    if (data.version != 1 || data.name.empty()) {
         return false;
     }
+    for (float value : {data.needs.energy, data.needs.hunger, data.needs.mood, data.needs.trust,
+                        data.personality.curiosity, data.personality.playfulness, data.personality.laziness})
+        if (!std::isfinite(value)) return false;
+    if (data.history.timesPlayed < 0 || data.history.timesFed < 0 || data.history.timesPetted < 0) return false;
     const auto& n = data.needs;
     if (n.energy < 0.0f || n.energy > 1.0f ||
         n.hunger < 0.0f || n.hunger > 1.0f ||
@@ -52,153 +57,86 @@ bool SaveManager::Validate(const PetStateData& data) const noexcept {
     return true;
 }
 
-std::string SaveManager::SerializeToJson(const PetStateData& data) const {
-    std::ostringstream ss;
-    ss << std::fixed << std::setprecision(2);
-    ss << "{\n";
-    ss << "  \"version\": " << data.version << ",\n";
-    ss << "  \"name\": \"" << data.name << "\",\n";
-    ss << "  \"energy\": " << data.needs.energy << ",\n";
-    ss << "  \"mood\": " << data.needs.mood << ",\n";
-    ss << "  \"hunger\": " << data.needs.hunger << ",\n";
-    ss << "  \"trust\": " << data.needs.trust << ",\n";
-    ss << "  \"personality\": {\n";
-    ss << "    \"curiosity\": " << data.personality.curiosity << ",\n";
-    ss << "    \"playfulness\": " << data.personality.playfulness << ",\n";
-    ss << "    \"laziness\": " << data.personality.laziness << "\n";
-    ss << "  },\n";
-    ss << "  \"memory\": {\n";
-    ss << "    \"times_played\": " << data.history.timesPlayed << ",\n";
-    ss << "    \"favorite_screen_area\": \"" << data.history.favoriteScreenArea << "\"\n";
-    ss << "  }\n";
-    ss << "}\n";
-    return ss.str();
+using Json = nlohmann::json;
+
+std::string SaveManager::SerializeToJson(const PetStateData& d) const {
+    return Json{{"version", d.version}, {"name", d.name},
+        {"energy", d.needs.energy}, {"mood", d.needs.mood},
+        {"hunger", d.needs.hunger}, {"trust", d.needs.trust},
+        {"personality", {{"curiosity", d.personality.curiosity}, {"playfulness", d.personality.playfulness}, {"laziness", d.personality.laziness}}},
+        {"memory", {{"times_played", d.history.timesPlayed}, {"times_fed", d.history.timesFed},
+            {"times_petted", d.history.timesPetted}, {"favorite_screen_area", d.history.favoriteScreenArea}}}}.dump(2);
 }
 
-bool SaveManager::DeserializeFromJson(const std::string& json, PetStateData& outData) const {
-    outData = GetDefaultState();
-
-    auto extractString = [&](const std::string& key) -> std::string {
-        std::regex re("\"" + key + "\"\\s*:\\s*\"([^\"]*)\"");
-        std::smatch m;
-        if (std::regex_search(json, m, re) && m.size() > 1) {
-            return m[1].str();
-        }
-        return "";
-    };
-
-    auto extractFloat = [&](const std::string& key, float defVal) -> float {
-        std::regex re("\"" + key + "\"\\s*:\\s*([0-9.-]+)");
-        std::smatch m;
-        if (std::regex_search(json, m, re) && m.size() > 1) {
-            try {
-                return std::stof(m[1].str());
-            } catch (...) {}
-        }
-        return defVal;
-    };
-
-    auto extractInt = [&](const std::string& key, int32_t defVal) -> int32_t {
-        std::regex re("\"" + key + "\"\\s*:\\s*([0-9-]+)");
-        std::smatch m;
-        if (std::regex_search(json, m, re) && m.size() > 1) {
-            try {
-                return std::stoi(m[1].str());
-            } catch (...) {}
-        }
-        return defVal;
-    };
-
-    outData.version = extractInt("version", 1);
-    std::string parsedName = extractString("name");
-    if (!parsedName.empty()) {
-        outData.name = parsedName;
-    }
-
-    outData.needs.energy = extractFloat("energy", 0.8f);
-    outData.needs.mood = extractFloat("mood", 0.8f);
-    outData.needs.hunger = extractFloat("hunger", 0.2f);
-    outData.needs.trust = extractFloat("trust", 0.5f);
-
-    outData.personality.curiosity = extractFloat("curiosity", 0.7f);
-    outData.personality.playfulness = extractFloat("playfulness", 0.7f);
-    outData.personality.laziness = extractFloat("laziness", 0.3f);
-
-    outData.history.timesPlayed = extractInt("times_played", 0);
-    std::string parsedArea = extractString("favorite_screen_area");
-    if (!parsedArea.empty()) {
-        outData.history.favoriteScreenArea = parsedArea;
-    }
-
-    return Validate(outData);
+bool SaveManager::DeserializeFromJson(const std::string& text, PetStateData& outData) const {
+    try {
+        const auto j = Json::parse(text);
+        PetStateData d = GetDefaultState();
+        d.version = j.at("version").get<int32_t>();
+        d.name = j.at("name").get<std::string>();
+        d.needs.energy = j.at("energy").get<float>();
+        d.needs.mood = j.at("mood").get<float>();
+        d.needs.hunger = j.at("hunger").get<float>();
+        d.needs.trust = j.at("trust").get<float>();
+        const auto& p = j.at("personality");
+        d.personality = {p.at("curiosity").get<float>(), p.at("playfulness").get<float>(), p.at("laziness").get<float>()};
+        const auto& h = j.at("memory");
+        d.history = {h.value("times_played", 0), h.value("times_fed", 0), h.value("times_petted", 0), h.value("favorite_screen_area", std::string("bottom-right"))};
+        if (!Validate(d)) return false;
+        outData = std::move(d);
+        return true;
+    } catch (const Json::exception&) { return false; }
 }
 
-bool SaveManager::DeserializeConfigFromJson(const std::string& json, AppConfigData& outConfig) const {
-    outConfig = GetDefaultConfig();
-
-    auto extractString = [&](const std::string& key) -> std::string {
-        std::regex re("\"" + key + "\"\\s*:\\s*\"([^\"]*)\"");
-        std::smatch m;
-        if (std::regex_search(json, m, re) && m.size() > 1) {
-            return m[1].str();
-        }
-        return "";
-    };
-
-    auto extractFloat = [&](const std::string& key, float defVal) -> float {
-        std::regex re("\"" + key + "\"\\s*:\\s*([0-9.-]+)");
-        std::smatch m;
-        if (std::regex_search(json, m, re) && m.size() > 1) {
-            try {
-                return std::stof(m[1].str());
-            } catch (...) {}
-        }
-        return defVal;
-    };
-
-    auto extractInt = [&](const std::string& key, int32_t defVal) -> int32_t {
-        std::regex re("\"" + key + "\"\\s*:\\s*([0-9-]+)");
-        std::smatch m;
-        if (std::regex_search(json, m, re) && m.size() > 1) {
-            try {
-                return std::stoi(m[1].str());
-            } catch (...) {}
-        }
-        return defVal;
-    };
-
-    auto extractBool = [&](const std::string& key, bool defVal) -> bool {
-        std::regex re("\"" + key + "\"\\s*:\\s*(true|false)");
-        std::smatch m;
-        if (std::regex_search(json, m, re) && m.size() > 1) {
-            return m[1].str() == "true";
-        }
-        return defVal;
-    };
-
-    std::string title = extractString("title");
-    if (!title.empty()) outConfig.title = title;
-
-    outConfig.targetFps = extractInt("target_fps", 60);
-    outConfig.alwaysOnTop = extractBool("always_on_top", true);
-    outConfig.transparentBackground = extractBool("transparent_background", true);
-    outConfig.startWithWindows = extractBool("start_with_windows", false);
-
-    outConfig.windowWidth = extractInt("width", 128);
-    outConfig.windowHeight = extractInt("height", 128);
-    outConfig.windowScale = extractFloat("scale", 2.0f);
-
-    outConfig.gravity = extractFloat("gravity", 980.0f);
-    outConfig.groundMargin = extractInt("ground_margin", 10);
-    outConfig.edgeBounce = extractFloat("edge_bounce", 0.2f);
-    outConfig.dragSmoothing = extractFloat("drag_smoothing", 0.15f);
-
-    outConfig.idleTimeoutSeconds = extractFloat("idle_timeout_seconds", 30.0f);
-    outConfig.energyDepletionRate = extractFloat("energy_depletion_rate", 0.005f);
-    outConfig.hungerIncreaseRate = extractFloat("hunger_increase_rate", 0.008f);
-    outConfig.mouseProximityDistancePx = extractFloat("mouse_proximity_distance_px", 150.0f);
-
-    return true;
+bool SaveManager::DeserializeConfigFromJson(const std::string& text, AppConfigData& outConfig) const {
+    try {
+        const auto j = Json::parse(text);
+        if (!j.is_object()) return false;
+        AppConfigData c;
+        c.version = j.value("version", 1);
+        const auto app = j.value("app", Json::object());
+        c.title = app.value("title", c.title);
+        c.targetFps = app.value("target_fps", c.targetFps);
+        c.alwaysOnTop = app.value("always_on_top", c.alwaysOnTop);
+        c.transparentBackground = app.value("transparent_background", c.transparentBackground);
+        c.startWithWindows = app.value("start_with_windows", c.startWithWindows);
+        const auto window = j.value("window", Json::object());
+        c.windowWidth = window.value("width", c.windowWidth);
+        c.windowHeight = window.value("height", c.windowHeight);
+        c.windowScale = window.value("scale", c.windowScale);
+        c.initialPosition = window.value("initial_position", c.initialPosition);
+        const auto physics = j.value("physics", Json::object());
+        c.gravity = physics.value("gravity", c.gravity);
+        c.groundMargin = physics.value("ground_margin", c.groundMargin);
+        c.edgeBounce = physics.value("edge_bounce", c.edgeBounce);
+        c.dragSmoothing = physics.value("drag_smoothing", c.dragSmoothing);
+        const auto behavior = j.value("behavior", Json::object());
+        c.tickRateHz = behavior.value("tick_rate_hz", c.tickRateHz);
+        c.idleTimeoutSeconds = behavior.value("idle_timeout_seconds", c.idleTimeoutSeconds);
+        c.energyDepletionRate = behavior.value("energy_depletion_rate", c.energyDepletionRate);
+        c.hungerIncreaseRate = behavior.value("hunger_increase_rate", c.hungerIncreaseRate);
+        const auto sensors = j.value("sensors", Json::object());
+        c.mouseProximityDistancePx = sensors.value("mouse_proximity_distance_px", c.mouseProximityDistancePx);
+        c.detectCursorDrag = sensors.value("detect_cursor_drag", c.detectCursorDrag);
+        c.idleSystemThresholdSeconds = sensors.value("idle_system_threshold_seconds", c.idleSystemThresholdSeconds);
+        const auto paths = j.value("paths", Json::object());
+        c.assetsDir = paths.value("assets_dir", c.assetsDir);
+        c.dataDir = paths.value("data_dir", c.dataDir);
+        c.saveFile = paths.value("save_file", (std::filesystem::path(c.dataDir) / "pet_state.json").string());
+        const auto range = [](float v, float lo, float hi) { return std::isfinite(v) && v >= lo && v <= hi; };
+        if (c.version != 1 || c.title.empty() || c.targetFps < 1 || c.targetFps > 240 ||
+            c.windowWidth < 1 || c.windowWidth > 2048 || c.windowHeight < 1 || c.windowHeight > 2048 ||
+            !range(c.windowScale, 0.1f, 8.0f) || c.windowWidth*c.windowScale > 4096 || c.windowHeight*c.windowScale > 4096 ||
+            !range(c.gravity, 0, 10000) || c.groundMargin < 0 || c.groundMargin > 1000 ||
+            !range(c.edgeBounce, 0, 1) || !range(c.dragSmoothing, 0.01f, 10) ||
+            !range(c.tickRateHz, 1, 240) || !range(c.idleTimeoutSeconds, 0.1f, 3600) ||
+            !range(c.energyDepletionRate, 0, 1) || !range(c.hungerIncreaseRate, 0, 1) ||
+            !range(c.mouseProximityDistancePx, 0, 10000) || !range(c.idleSystemThresholdSeconds, 1, 86400) ||
+            c.assetsDir.empty() || c.dataDir.empty() || c.saveFile.empty() ||
+            (c.initialPosition != "tray_bottom_right" && c.initialPosition != "bottom-right" && c.initialPosition != "bottom-left" && c.initialPosition != "center")) return false;
+        outConfig = std::move(c);
+        return true;
+    } catch (const Json::exception&) { return false; }
 }
 
 bool SaveManager::Load(PetStateData& outData) {
@@ -231,32 +169,34 @@ bool SaveManager::Load(PetStateData& outData) {
 
 bool SaveManager::Save(const PetStateData& data) {
     namespace fs = std::filesystem;
+    if (!Validate(data) || m_filePath.empty()) return false;
     std::error_code ec;
-
-    fs::path targetPath(m_filePath);
+    const fs::path targetPath(m_filePath);
     if (targetPath.has_parent_path()) {
         fs::create_directories(targetPath.parent_path(), ec);
+        if (ec) return false;
     }
-
     fs::path tempPath = targetPath;
     tempPath += ".tmp";
-
-    std::ofstream out(tempPath, std::ios::trunc);
-    if (!out.is_open()) {
+    std::ofstream out(tempPath, std::ios::binary | std::ios::trunc);
+    if (!out) return false;
+    try { out << SerializeToJson(data); }
+    catch (const Json::exception&) { out.close(); fs::remove(tempPath, ec); return false; }
+    out.flush();
+    bool written = out.good();
+    out.close();
+    if (!written || out.fail()) { fs::remove(tempPath, ec); return false; }
+#ifdef _WIN32
+    // Replace the destination without a non-atomic copy fallback.
+    if (!::MoveFileExW(tempPath.c_str(), targetPath.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        fs::remove(tempPath, ec);
         return false;
     }
-
-    out << SerializeToJson(data);
-    out.flush();
-    out.close();
-
+#else
     fs::rename(tempPath, targetPath, ec);
-    if (ec) {
-        fs::copy_file(tempPath, targetPath, fs::copy_options::overwrite_existing, ec);
-        fs::remove(tempPath, ec);
-    }
-
-    return !ec;
+    if (ec) { std::error_code cleanup; fs::remove(tempPath, cleanup); return false; }
+#endif
+    return true;
 }
 
 bool SaveManager::LoadConfig(const std::string& configPath, AppConfigData& outConfig) {
@@ -278,6 +218,7 @@ bool SaveManager::LoadConfig(const std::string& configPath, AppConfigData& outCo
     buffer << file.rdbuf();
     file.close();
 
+    outConfig = GetDefaultConfig();
     return DeserializeConfigFromJson(buffer.str(), outConfig);
 }
 
@@ -314,9 +255,9 @@ bool SaveManager::SetStartWithWindows(bool enable) {
                 return (res == ERROR_SUCCESS);
             }
         } else {
-            ::RegDeleteValueW(hKey, L"VirtualPet");
+            LONG result = ::RegDeleteValueW(hKey, L"VirtualPet");
             ::RegCloseKey(hKey);
-            return true;
+            return result == ERROR_SUCCESS || result == ERROR_FILE_NOT_FOUND;
         }
         ::RegCloseKey(hKey);
     }

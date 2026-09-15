@@ -53,6 +53,8 @@ struct WindowSurface {
 class DesktopWorld {
 public:
     DesktopWorld();
+    /// Creates a fixed geometry snapshot for simulations and deterministic tests.
+    DesktopWorld(Rect workArea, std::vector<WindowSurface> surfaces);
     ~DesktopWorld() = default;
 
     /// Refreshes monitor geometry, taskbar positions, and visible window surfaces.

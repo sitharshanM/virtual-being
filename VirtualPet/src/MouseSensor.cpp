@@ -34,12 +34,17 @@ void MouseSensor::ResetFrameState() {
     m_state.rightButtonClicked = false;
 }
 
+void MouseSensor::CancelInteraction() noexcept {
+    m_trackingClick = false;
+    m_state.isDragging = false;
+    m_state.leftButtonDown = false;
+    ResetFrameState();
+}
+
 void MouseSensor::Update(float deltaTime, const Rect& petBounds) {
     (void)deltaTime;
 
-    // Reset single-frame triggers
-    m_state.leftButtonClicked = false;
-    m_state.rightButtonClicked = false;
+    // Events stay latched until the consumer calls ResetFrameState().
 
     // Poll system cursor position and button states
     PollOSCursor();
@@ -66,7 +71,7 @@ void MouseSensor::Update(float deltaTime, const Rect& petBounds) {
     // Evaluate drag interaction
     if (m_config.detectCursorDrag) {
         if (m_state.leftButtonDown) {
-            if (!m_state.isDragging && m_state.isHovering && !m_trackingClick) {
+            if (!m_prevLeftButtonDown && !m_state.isDragging && m_state.isHovering && !m_trackingClick) {
                 m_trackingClick = true;
                 m_clickStartPos = m_state.screenPosition;
                 m_state.dragOffset = m_state.petRelativePosition;

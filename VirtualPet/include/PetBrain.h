@@ -51,6 +51,9 @@ struct UtilityScores {
 class PetBrain {
 public:
     PetBrain();
+    void RequestAction(PetAction action, float duration = 1.8f);
+    void Configure(float tickRate, float idleTimeout) { m_tickInterval = 1.0f / tickRate; m_actionDuration = idleTimeout; }
+
     ~PetBrain() = default;
 
     /// Evaluates observations, computes utility scores, and selects optimal behavioral intent.
@@ -78,6 +81,10 @@ private:
     UtilityScores m_lastScores;
 
     float m_actionTimer{0.0f};
+    float m_tickInterval{0.1f};
+    float m_scoreTimer{0.0f};
+    float m_contactCooldown{0.0f};
+    bool m_manualSleep{false};
     float m_actionDuration{4.0f};
     int32_t m_wanderTargetX{0};
     bool m_facingLeft{false};

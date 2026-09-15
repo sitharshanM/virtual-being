@@ -4,6 +4,7 @@
 #include <chrono>
 #include <memory>
 #include <string>
+#include <algorithm>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -14,6 +15,7 @@
 #include <shellapi.h>
 #endif
 
+ #ifdef _WIN32
 namespace {
 
 constexpr const wchar_t* WINDOW_CLASS_NAME = L"VirtualPetWindowClass";
@@ -39,6 +41,35 @@ constexpr UINT_PTR ID_MENU_EXIT           = 1008;
 std::unique_ptr<VirtualPet::Pet> g_pet = nullptr;
 NOTIFYICONDATAW g_nid{};
 bool g_isPetVisible = true;
+HWND g_toyWindow = nullptr;
+
+std::wstring Utf8ToWide(const std::string& value) {
+    const int size = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), nullptr, 0);
+    if (size <= 0) return L"Virtual Pet";
+    std::wstring result(size, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), result.data(), size);
+    return result;
+}
+
+LRESULT CALLBACK ToyWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_NCHITTEST) return HTTRANSPARENT;
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps;
+        HDC dc = BeginPaint(hwnd, &ps);
+        RECT rect; GetClientRect(hwnd, &rect);
+        HBRUSH background = CreateSolidBrush(TRANSPARENT_COLOR_KEY);
+        FillRect(dc, &rect, background); DeleteObject(background);
+        if (g_pet) {
+            const auto& toy = g_pet->GetPhysics().GetToy();
+            HBRUSH brush = CreateSolidBrush(toy.isTreat ? RGB(180,100,40) : RGB(220,50,50));
+            auto old = SelectObject(dc, brush);
+            Ellipse(dc, 0, 0, rect.right, rect.bottom);
+            SelectObject(dc, old); DeleteObject(brush);
+        }
+        EndPaint(hwnd, &ps); return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
 
 void ShowPetStatusDialog(HWND hwnd) {
     if (!g_pet) return;
@@ -91,7 +122,8 @@ void ShowPetContextMenu(HWND hwnd, POINT pt) {
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
         case WM_CREATE: {
-            ::SetLayeredWindowAttributes(hwnd, TRANSPARENT_COLOR_KEY, 0, LWA_COLORKEY);
+            if (g_pet->GetConfig().transparentBackground)
+                ::SetLayeredWindowAttributes(hwnd, TRANSPARENT_COLOR_KEY, 0, LWA_COLORKEY);
 
             // Register Windows System Tray Icon
             ZeroMemory(&g_nid, sizeof(NOTIFYICONDATAW));
@@ -170,14 +202,23 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         }
 
         case WM_LBUTTONUP: {
-            ::ReleaseCapture();
             POINT pt{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
             ::ClientToScreen(hwnd, &pt);
             if (g_pet) {
                 g_pet->OnLButtonUp(VirtualPet::Point(pt.x, pt.y));
             }
+            ::ReleaseCapture();
             return 0;
         }
+
+        case WM_CANCELMODE:
+            if (g_pet) g_pet->CancelInteraction();
+            ::ReleaseCapture();
+            return 0;
+
+        case WM_CAPTURECHANGED:
+            if (g_pet && g_pet->GetMouseSensor().IsLeftButtonDown()) g_pet->CancelInteraction();
+            return 0;
 
         case WM_RBUTTONUP: {
             POINT pt{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
@@ -227,6 +268,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
         }
 
+        case WM_DISPLAYCHANGE:
+        case WM_SETTINGCHANGE:
+            if (g_pet) g_pet->RefreshDesktop();
+            return 0;
+
         case WM_DESTROY: {
             ::Shell_NotifyIconW(NIM_DELETE, &g_nid);
             ::PostQuitMessage(0);
@@ -243,7 +289,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 int RunApplication(HINSTANCE hInstance) {
     // 1. Initialize Pet system
     g_pet = std::make_unique<VirtualPet::Pet>();
-    g_pet->Init();
+    if (!g_pet->Init()) return 1;
+    const auto& config = g_pet->GetConfig();
 
     // 2. Register Window Class
     WNDCLASSEXW wc{};
@@ -264,9 +311,9 @@ int RunApplication(HINSTANCE hInstance) {
     int height = g_pet->GetHeight();
 
     HWND hwnd = ::CreateWindowExW(
-        WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+        (config.transparentBackground ? WS_EX_LAYERED : 0) | (config.alwaysOnTop ? WS_EX_TOPMOST : 0) | WS_EX_TOOLWINDOW,
         WINDOW_CLASS_NAME,
-        WINDOW_TITLE,
+        Utf8ToWide(config.title).c_str(),
         WS_POPUP,
         initialPos.x, initialPos.y,
         width, height,
@@ -278,11 +325,20 @@ int RunApplication(HINSTANCE hInstance) {
         return 1;
     }
 
+    WNDCLASSW toyClass{};
+    toyClass.lpfnWndProc = ToyWndProc;
+    toyClass.hInstance = hInstance;
+    toyClass.lpszClassName = L"VirtualPetToy";
+    RegisterClassW(&toyClass);
+    g_toyWindow = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW |
+        (config.alwaysOnTop ? WS_EX_TOPMOST : 0), L"VirtualPetToy", L"", WS_POPUP,
+        0, 0, 28, 28, hwnd, nullptr, hInstance, nullptr);
+    if (g_toyWindow) SetLayeredWindowAttributes(g_toyWindow, TRANSPARENT_COLOR_KEY, 0, LWA_COLORKEY);
     ::ShowWindow(hwnd, SW_SHOW);
     ::UpdateWindow(hwnd);
 
     // 4. Main simulation loop at target ~60 FPS
-    using Clock = std::chrono::high_resolution_clock;
+    using Clock = std::chrono::steady_clock;
     auto prevTime = Clock::now();
     bool running = true;
     MSG msg{};
@@ -306,6 +362,14 @@ int RunApplication(HINSTANCE hInstance) {
         // Step pet simulation
         if (g_pet) {
             g_pet->Update(deltaTime);
+            const auto& toy = g_pet->GetPhysics().GetToy();
+            if (g_toyWindow) {
+                if (toy.active && g_isPetVisible) {
+                    SetWindowPos(g_toyWindow, nullptr, static_cast<int>(toy.x)-toy.radius, static_cast<int>(toy.y)-toy.radius,
+                        toy.radius*2, toy.radius*2, SWP_NOACTIVATE | SWP_NOZORDER | SWP_SHOWWINDOW);
+                    InvalidateRect(g_toyWindow, nullptr, FALSE);
+                } else ShowWindow(g_toyWindow, SW_HIDE);
+            }
 
             if (g_isPetVisible) {
                 // Synchronize window location on the desktop with physics position
@@ -319,12 +383,19 @@ int RunApplication(HINSTANCE hInstance) {
         }
 
         // Frame rate limiter (~60 FPS -> 16 ms)
-        ::Sleep(16);
+        const auto elapsed = Clock::now() - currentTime;
+        const auto budget = std::chrono::duration<double>(1.0 / config.targetFps);
+        if (elapsed < budget) {
+            DWORD wait = static_cast<DWORD>(std::chrono::duration<double, std::milli>(budget - elapsed).count());
+            ::Sleep((std::max)(DWORD(1), wait));
+        }
     }
 
     g_pet.reset();
     return static_cast<int>(msg.wParam);
 }
+
+#endif
 
 #ifdef _WIN32
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int) {

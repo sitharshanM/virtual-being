@@ -78,6 +78,14 @@ DesktopWorld::DesktopWorld() {
     Refresh();
 }
 
+DesktopWorld::DesktopWorld(Rect workArea, std::vector<WindowSurface> surfaces)
+    : m_windowSurfaces(std::move(surfaces)), m_primaryWorkArea(workArea), m_virtualScreenBounds(workArea) {
+    MonitorInfo monitor;
+    monitor.workArea = monitor.fullArea = workArea;
+    monitor.isPrimary = true;
+    m_monitors.push_back(monitor);
+}
+
 void DesktopWorld::Refresh() {
     m_monitors.clear();
 
@@ -180,7 +188,9 @@ int32_t DesktopWorld::GetGroundY(int32_t x, int32_t height, int32_t groundMargin
 }
 
 int32_t DesktopWorld::GetSupportingSurfaceY(int32_t x, int32_t currentY, int32_t width, int32_t height, int32_t groundMargin) const noexcept {
-    int32_t bestGroundY = GetGroundY(x, height, groundMargin);
+    const auto* monitor = GetMonitorAt(Point(x, currentY));
+    const Rect area = monitor ? monitor->workArea : m_primaryWorkArea;
+    int32_t bestGroundY = area.y + area.height - height - groundMargin;
 
     // Check if pet can land on top of any open application window
     for (const auto& ws : m_windowSurfaces) {

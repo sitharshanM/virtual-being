@@ -9,6 +9,13 @@ PetBrain::PetBrain() {
     BuildBehaviorTree();
 }
 
+void PetBrain::RequestAction(PetAction action, float duration) {
+    m_currentAction = action;
+    m_actionTimer = duration;
+    m_manualSleep = action == PetAction::Sleeping;
+    if (action == PetAction::ReactingToClick) m_currentThought = "Enjoying your attention!";
+}
+
 void PetBrain::BuildBehaviorTree() {
     m_tree = std::make_unique<BehaviorTree>();
 }
@@ -66,6 +73,8 @@ BrainDecision PetBrain::Update(float deltaTime,
                                Physics& physics) {
     (void)world;
     m_actionTimer -= deltaTime;
+    m_scoreTimer -= deltaTime;
+    m_contactCooldown -= deltaTime;
 
     const Point petPos = physics.GetPosition();
     const Point cursor = mouse.GetCursorPosition();
@@ -73,6 +82,7 @@ BrainDecision PetBrain::Update(float deltaTime,
 
     // 1. High Priority Direct Sensory Overrides
     if (physics.IsDragged()) {
+        m_manualSleep = false;
         m_currentAction = PetAction::Dragged;
         m_currentThought = "Wheee! Flying across the desktop windows!";
         BrainDecision d;
@@ -85,6 +95,7 @@ BrainDecision PetBrain::Update(float deltaTime,
     }
 
     if (mouse.WasLeftButtonClicked()) {
+        m_manualSleep = false;
         memory.Pet(0.08f);
         m_currentAction = PetAction::ReactingToClick;
         m_currentThought = "Purring with happiness from your pets!";
@@ -102,10 +113,23 @@ BrainDecision PetBrain::Update(float deltaTime,
     }
 
     // 2. Evaluate Utility Curves for autonomous behavior
-    m_lastScores = CalculateUtilityScores(memory, mouse, system, physics);
+    if (m_manualSleep && memory.GetNeeds().energy < 0.95f) {
+        memory.Rest(deltaTime, 0.06f);
+        BrainDecision d;
+        d.action = PetAction::Sleeping;
+        d.animState = AnimationState::Sleep;
+        d.facingLeft = m_facingLeft;
+        m_currentThought = d.thought = "Zzz... having sweet desktop dreams.";
+        return d;
+    }
+    m_manualSleep = false;
+    if (m_scoreTimer <= 0.0f) {
+        m_lastScores = CalculateUtilityScores(memory, mouse, system, physics);
+        m_scoreTimer = m_tickInterval;
+    }
 
     // Pick motivation with highest score
-    float maxScore = -1.0f;
+    float maxScore = m_lastScores.idleScore;
     PetAction chosenAction = PetAction::Idle;
 
     if (m_lastScores.eatScore > maxScore && toy.active && toy.isTreat) {
@@ -137,7 +161,7 @@ BrainDecision PetBrain::Update(float deltaTime,
     if (m_actionTimer <= 0.0f || chosenAction == PetAction::EatingTreat || chosenAction == PetAction::ChasingToy) {
         m_currentAction = chosenAction;
         if (m_currentAction == PetAction::Wandering || m_currentAction == PetAction::Idle) {
-            m_actionTimer = 3.0f + (static_cast<float>(rand() % 100) / 100.0f) * 4.0f;
+            m_actionTimer = m_actionDuration;
         }
     }
 
@@ -151,7 +175,7 @@ BrainDecision PetBrain::Update(float deltaTime,
             m_facingLeft = (dx < 0.0f);
             m_currentThought = "Sniffing out a yummy desktop treat!";
 
-            if (std::abs(dx) > 18.0f) {
+            if (std::abs(dx) > 18.0f || toy.y + toy.radius < petPos.y || toy.y - toy.radius > petPos.y + physics.GetHeight()) {
                 decision.animState = AnimationState::Walk;
                 decision.targetHorizontalSpeed = m_facingLeft ? -100.0f : 100.0f;
             } else {
@@ -176,7 +200,8 @@ BrainDecision PetBrain::Update(float deltaTime,
                 float speed = (std::abs(dx) > 80.0f) ? 150.0f : 90.0f;
                 decision.animState = (speed > 100.0f) ? AnimationState::Run : AnimationState::Walk;
                 decision.targetHorizontalSpeed = m_facingLeft ? -speed : speed;
-            } else {
+            } else if (toy.y + toy.radius >= petPos.y && toy.y - toy.radius <= petPos.y + physics.GetHeight() && m_contactCooldown <= 0.0f) {
+                m_contactCooldown = 0.5f;
                 // Reached toy! Bat and play
                 decision.animState = AnimationState::Reaction;
                 decision.targetHorizontalSpeed = 0.0f;

@@ -1,125 +1,94 @@
+# Virtual Pet
 
+A Windows desktop companion written in C++17. It has a transparent pet window,
+mouse dragging and petting, autonomous movement and sleep, desktop window
+collisions, a tray menu, and throwable toys and treats.
 
-A planned Windows C++ virtual companion whose world is your desktop.
+## Build and test
 
-**Status: architecture scaffold only.** This repository contains the project
-layout, responsibility notes and sample state. The application is not implemented
-or runnable yet. Coding starts in the next development session.
+Requires CMake 3.15+ and a Windows C++17 compiler with the Windows SDK
+(MSVC or MinGW-w64). From the repository root:
 
-## Project structure
-
-```text
-virtual-being/
-├── CMakeLists.txt
-├── .gitignore
-├── LICENSE
-├── README.md
-└── VirtualPet/
-    ├── CMakeLists.txt
-    ├── README.md
-    ├── .gitignore
-    ├── src/
-    │   ├── main.cpp
-    │   ├── Pet.cpp
-    │   ├── PetBrain.cpp
-    │   ├── BehaviorTree.cpp
-    │   ├── Memory.cpp
-    │   ├── Animation.cpp
-    │   ├── Physics.cpp
-    │   ├── DesktopWorld.cpp
-    │   ├── MouseSensor.cpp
-    │   ├── SystemSensor.cpp
-    │   └── SaveManager.cpp
-    ├── include/
-    │   ├── Pet.h
-    │   ├── PetBrain.h
-    │   ├── BehaviorTree.h
-    │   ├── Memory.h
-    │   ├── Animation.h
-    │   ├── Physics.h
-    │   ├── DesktopWorld.h
-    │   ├── MouseSensor.h
-    │   ├── SystemSensor.h
-    │   └── SaveManager.h
-    ├── assets/
-    │   ├── idle/
-    │   ├── walk/
-    │   ├── run/
-    │   ├── sleep/
-    │   └── reactions/
-    ├── data/
-    │   └── pet_state.json
-    └── config/
-        └── pet_config.json
+```powershell
+cmake -S . -B build
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
 ```
 
-Asset folders contain `.gitkeep` files so Git retains the empty directories.
+For Ninja/MinGW, run from the toolchain shell or put its `bin` directory on PATH:
 
-## Module responsibilities
+```powershell
+cmake -S . -B build -G Ninja
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+The executable is under `build/VirtualPet` (or its `Release` subfolder for
+multi-configuration generators). CMake copies `config` and `assets` beside it.
+Both repository-root and `VirtualPet`-directory builds support CTest.
+
+## Controls
+
+- Click the pet to pet it; drag to move and throw it.
+- Right-click the pet or click its tray icon for feeding, play, sleep, toys,
+  visibility, startup registration, status, and exit.
+- Sleep requests persist until the pet recovers; petting or dragging interrupts them.
+- Toys use a separate transparent window and remain visible away from the pet.
+
+## Configuration and saves
+
+Edit `config/pet_config.json` beside the executable. Configuration is validated;
+invalid files fall back to defaults. Changes take effect after restarting.
+
+Settings include frame rate, window size/scale/title/topmost/transparency,
+physics, behavior scoring frequency, needs decay, mouse interaction, idle
+threshold, resource paths, and initial position (`tray_bottom_right`,
+`bottom-right`, `bottom-left`, or `center`).
+
+Relative asset paths resolve from the application resource root. Default runtime
+state is `%LOCALAPPDATA%/VirtualPet/data/pet_state.json`, independent of the
+working directory. Relative `paths.save_file` values resolve beneath
+`%LOCALAPPDATA%/VirtualPet`. If `save_file` is omitted, `data_dir/pet_state.json`
+is used. Absolute save paths and explicit `Pet::Init` state paths are supported.
+To retain an existing save from an older build, copy it to the new runtime path.
+The checked-in `VirtualPet/data/pet_state.json` is sample data.
+
+Saves validate values, preserve all interaction counters and escaped text, and
+replace the destination atomically. Invalid or unreadable saves return default
+state; failed writes are reported to the application's error stream.
+
+## Artwork
+
+Place original or appropriately licensed PNG, BMP, JPG, or JPEG frames in
+`assets/idle`, `walk`, `run`, `sleep`, and `reactions`. Use zero-padded filenames
+such as `001.png`, `002.png`. Frames play in filename order at 0.1 seconds per
+frame. Invalid images are skipped. Without artwork, a procedural pet is shown.
+The window uses a magenta transparency key; fully transparent image regions
+show through. Semi-transparent edges may show a color-key fringe.
+
+## Code layout
 
 | Module | Responsibility |
 | --- | --- |
-| main | Windows startup, window lifecycle and event loop |
-| Pet | Pet identity, current state and orchestration. |
-| PetBrain | Behavior decisions; later utility AI and optional dialogue. |
-| BehaviorTree | Conditions, selectors, sequences and action lifecycle. |
-| Memory | Persistent needs, personality and interaction history. |
-| Animation | Animation clips and rendering. |
-| Physics | Movement, gravity and desktop edge collisions. |
-| DesktopWorld | Monitor work areas, desktop boundaries and window surfaces. |
-| MouseSensor | Cursor position, proximity and drag interactions. |
-| SystemSensor | Idle time, battery and opt-in system observations. |
-| SaveManager | Versioned JSON persistence, validation and recovery. |
+| main | Win32 windows, tray menu, input, rendering and frame pacing |
+| Pet | Coordinates sensors, brain, physics, animation and persistence |
+| PetBrain | Utility scores, manual actions and interaction behavior |
+| Physics / DesktopWorld | Movement, monitor bounds and window surfaces |
+| Animation | GDI+ decoding, playback and rendering |
+| MouseSensor / SystemSensor | Cursor, inactivity, time and power observations |
+| Memory / SaveManager | Needs, personality, history, configuration and JSON saves |
+| BehaviorTree | Standalone sequence/selector primitives for future behaviors |
 
-## Planned architecture
+Tests cover persistence and failure paths, config validation, clicks, manual
+actions, toy contact, physics, animation timing, image decoding and rendering.
+Interactive tray behavior and mixed-DPI/multiple-monitor layouts still benefit
+from manual testing on the target desktop.
 
-Mouse and system observations feed the pet brain. The brain selects actions;
-physics updates movement and animation renders the current state. Memory stores
-the pet's needs and history, while SaveManager loads and saves them.
-DesktopWorld provides the screen geometry used by movement and perception.
+The pinned nlohmann/json 3.11.3 header and MIT license are vendored under
+`VirtualPet/third_party/nlohmann`; builds do not download dependencies.
 
-## Development roadmap
+## Privacy and license
 
-### Phase 1 — Desktop foundation
-- Transparent, borderless, always-on-top Win32 window.
-- Basic idle, walk, sleep and reaction animations.
-- Mouse interaction and dragging.
-- Gravity and desktop edge handling.
-- Validated save/load state with recovery from malformed files.
-- Optional Windows startup integration with an explicit user setting.
-
-### Phase 2 — Behavior and awareness
-- Hunger, energy, mood and personality.
-- Utility AI and behavior tree actions.
-- Day/night cycles, idle detection and battery reactions.
-- Persistent interaction memory.
-
-### Phase 3 — Learning and dialogue
-- Bounded local learning and evolving preferences.
-- More animations and optional app awareness.
-- Optional local LLM dialogue, separate from real-time behavior.
-- Multiple pets and interactions.
-
-## Build status
-
-The CMake file is a placeholder; there are no executable targets or build
-instructions yet. The planned toolchain is C++17, CMake and the Windows SDK
-(for example, Visual Studio with Desktop development with C++).
-
-## Assets and persistence
-
-No artwork is bundled yet. Add original or appropriately licensed sprite frames
-to the action folders when implementing animation.
-
-`VirtualPet/data/pet_state.json` is a proposed sample schema, not an active save
-file. Runtime save locations, schema migrations and atomic writes remain TODOs.
-
-## Privacy by design
-
-Keep the core behavior local. Future startup, app-awareness and LLM integrations
-should be opt-in. Avoid collecting window contents or sending desktop activity
-to external services by default.
-
-## License
-
-MIT — see [LICENSE](LICENSE).
+Behavior runs locally. Window geometry/titles, cursor, idle time, clock, and
+power state are observed locally; no desktop activity is sent to a service.
+Startup registration is optional. Project license: MIT (see `LICENSE`).

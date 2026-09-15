@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <filesystem>
 #include <iostream>
+#include <cmath>
+#include <cctype>
 
 #ifdef _WIN32
 #include <wingdi.h>
@@ -37,10 +39,12 @@ AnimationState StringToAnimationState(const std::string& name) noexcept {
 
 AnimationClip::AnimationClip(std::string name, bool isLooping, float defaultFrameDuration)
     : m_name(std::move(name)), m_isLooping(isLooping) {
-    (void)defaultFrameDuration;
+    if (std::isfinite(defaultFrameDuration) && defaultFrameDuration > 0)
+        m_defaultFrameDuration = defaultFrameDuration;
 }
 
 void AnimationClip::AddFrame(const AnimationFrame& frame) {
+    if (!std::isfinite(frame.durationSeconds) || frame.durationSeconds <= 0) return;
     m_frames.push_back(frame);
     m_totalDuration += frame.durationSeconds;
 }
@@ -48,19 +52,11 @@ void AnimationClip::AddFrame(const AnimationFrame& frame) {
 void AnimationClip::AddFrame(const std::string& filePath, float durationSeconds) {
     AnimationFrame frame;
     frame.filePath = filePath;
-    frame.durationSeconds = durationSeconds;
+    frame.durationSeconds = durationSeconds == -1.0f ? m_defaultFrameDuration : durationSeconds;
     AddFrame(frame);
 }
 
 void AnimationClip::Clear() {
-#ifdef _WIN32
-    for (auto& frame : m_frames) {
-        if (frame.hBitmap) {
-            ::DeleteObject(frame.hBitmap);
-            frame.hBitmap = nullptr;
-        }
-    }
-#endif
     m_frames.clear();
     m_totalDuration = 0.0f;
 }
@@ -77,6 +73,10 @@ const AnimationFrame* AnimationClip::GetFrame(size_t index) const noexcept {
 // ============================================================================
 
 Animation::Animation() {
+#ifdef _WIN32
+    Gdiplus::GdiplusStartupInput input;
+    Gdiplus::GdiplusStartup(&m_gdiToken, &input, nullptr);
+#endif
     // Initialize default clips for core states
     RegisterClip(AnimationState::Idle, AnimationClip("idle", true));
     RegisterClip(AnimationState::Walk, AnimationClip("walk", true));
@@ -89,10 +89,9 @@ Animation::Animation() {
 }
 
 Animation::~Animation() {
+    m_clips.clear();
 #ifdef _WIN32
-    for (auto& [name, clip] : m_clips) {
-        clip.Clear();
-    }
+    if (m_gdiToken) Gdiplus::GdiplusShutdown(m_gdiToken);
 #endif
 }
 
@@ -103,6 +102,7 @@ void Animation::RegisterClip(AnimationState state, AnimationClip clip) {
 
 void Animation::RegisterClip(const std::string& name, AnimationClip clip) {
     m_clips[name] = std::move(clip);
+    if (m_currentClipName == name) PlayClip(name, true);
 }
 
 void Animation::Play(AnimationState state, bool restartIfSame) {
@@ -131,6 +131,7 @@ const AnimationFrame* Animation::GetCurrentFrame() const noexcept {
 }
 
 void Animation::Update(float deltaTime) {
+    if (!std::isfinite(deltaTime) || deltaTime <= 0) return;
     auto it = m_clips.find(m_currentClipName);
     if (it == m_clips.end()) {
         return;
@@ -146,24 +147,19 @@ void Animation::Update(float deltaTime) {
         return;
     }
 
-    const AnimationFrame* currentFrame = clip.GetFrame(m_currentFrameIndex);
-    const float frameDuration = currentFrame ? currentFrame->durationSeconds : 0.1f;
-
-    m_frameTimer += (deltaTime * m_playbackSpeed);
-
-    if (m_frameTimer >= frameDuration) {
-        m_frameTimer -= frameDuration;
-        m_currentFrameIndex++;
-
-        if (m_currentFrameIndex >= frameCount) {
-            if (clip.IsLooping()) {
-                m_currentFrameIndex = 0;
-            } else {
-                m_currentFrameIndex = (frameCount > 0) ? (frameCount - 1) : 0;
+    if (frameCount == 0) return;
+    m_frameTimer += deltaTime * m_playbackSpeed;
+    if (clip.IsLooping() && clip.GetTotalDuration() > 0)
+        m_frameTimer = std::fmod(m_frameTimer, clip.GetTotalDuration());
+    while (m_frameTimer >= clip.GetFrame(m_currentFrameIndex)->durationSeconds) {
+        m_frameTimer -= clip.GetFrame(m_currentFrameIndex)->durationSeconds;
+        if (++m_currentFrameIndex >= frameCount) {
+            if (clip.IsLooping()) m_currentFrameIndex = 0;
+            else {
+                m_currentFrameIndex = frameCount - 1;
                 m_isFinished = true;
-                if (m_onComplete) {
-                    m_onComplete(m_currentState);
-                }
+                if (m_onComplete) m_onComplete(m_currentState);
+                return;
             }
         }
     }
@@ -198,7 +194,8 @@ size_t Animation::LoadFromDirectory(const std::string& assetsDirectory) {
         std::vector<fs::path> imageFiles;
         for (const auto& entry : fs::directory_iterator(folderPath, ec)) {
             if (entry.is_regular_file(ec)) {
-                const std::string ext = entry.path().extension().string();
+                std::string ext = entry.path().extension().string();
+                std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
                 if (ext == ".png" || ext == ".bmp" || ext == ".jpg" || ext == ".jpeg") {
                     imageFiles.push_back(entry.path());
                 }
@@ -208,7 +205,16 @@ size_t Animation::LoadFromDirectory(const std::string& assetsDirectory) {
         std::sort(imageFiles.begin(), imageFiles.end());
 
         for (const auto& filePath : imageFiles) {
-            clip.AddFrame(filePath.string(), 0.1f);
+            AnimationFrame frame;
+            frame.filePath = filePath.string();
+#ifdef _WIN32
+            if (!m_gdiToken) continue;
+            frame.bitmap = std::make_shared<Gdiplus::Bitmap>(filePath.c_str());
+            if (frame.bitmap->GetLastStatus() != Gdiplus::Ok) continue;
+            frame.width = static_cast<int32_t>(frame.bitmap->GetWidth());
+            frame.height = static_cast<int32_t>(frame.bitmap->GetHeight());
+#endif
+            clip.AddFrame(frame);
         }
 
         if (!clip.IsEmpty()) {
@@ -226,26 +232,16 @@ bool Animation::Render(HDC hdc, int32_t destX, int32_t destY, int32_t destWidth,
 
     const AnimationFrame* frame = GetCurrentFrame();
 
-    if (frame && frame->hBitmap) {
-        HDC memDC = ::CreateCompatibleDC(hdc);
-        if (!memDC) return false;
-
-        HGDIOBJ oldBmp = ::SelectObject(memDC, frame->hBitmap);
-
-        int srcW = frame->width > 0 ? frame->width : destWidth;
-        int srcH = frame->height > 0 ? frame->height : destHeight;
-
+    if (frame && frame->bitmap) {
+        Gdiplus::Graphics graphics(hdc);
+        graphics.SetInterpolationMode(Gdiplus::InterpolationModeNearestNeighbor);
+        graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
         if (m_facingLeft) {
-            ::StretchBlt(hdc, destX + destWidth, destY, -destWidth, destHeight,
-                         memDC, 0, 0, srcW, srcH, SRCCOPY);
-        } else {
-            ::StretchBlt(hdc, destX, destY, destWidth, destHeight,
-                         memDC, 0, 0, srcW, srcH, SRCCOPY);
+            graphics.TranslateTransform(static_cast<float>(destX + destWidth), static_cast<float>(destY));
+            graphics.ScaleTransform(-1.0f, 1.0f);
+            destX = destY = 0;
         }
-
-        ::SelectObject(memDC, oldBmp);
-        ::DeleteDC(memDC);
-        return true;
+        return graphics.DrawImage(frame->bitmap.get(), destX, destY, destWidth, destHeight) == Gdiplus::Ok;
     }
 
     // Fallback: procedural rendering if sprite assets are not loaded yet
