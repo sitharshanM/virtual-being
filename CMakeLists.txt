@@ -1,2 +1,8 @@
-# TODO: Configure the Windows C++17 application and Windows SDK libraries.
-# Architecture scaffold only; no build targets are implemented yet.
+cmake_minimum_required(VERSION 3.15)
+project(VirtualBeing LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Add the VirtualPet application subdirectory
+add_subdirectory(VirtualPet)

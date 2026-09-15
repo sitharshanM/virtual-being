@@ -15,26 +15,42 @@ virtual-being/
 ├── LICENSE
 ├── README.md
 └── VirtualPet/
+    ├── CMakeLists.txt
+    ├── README.md
+    ├── .gitignore
     ├── src/
     │   ├── main.cpp
-    │   ├── Pet.cpp / Pet.h
-    │   ├── PetBrain.cpp / PetBrain.h
-    │   ├── BehaviorTree.cpp / BehaviorTree.h
-    │   ├── Memory.cpp / Memory.h
-    │   ├── Animation.cpp / Animation.h
-    │   ├── Physics.cpp / Physics.h
-    │   ├── DesktopWorld.cpp / DesktopWorld.h
-    │   ├── MouseSensor.cpp / MouseSensor.h
-    │   ├── SystemSensor.cpp / SystemSensor.h
-    │   └── SaveManager.cpp / SaveManager.h
+    │   ├── Pet.cpp
+    │   ├── PetBrain.cpp
+    │   ├── BehaviorTree.cpp
+    │   ├── Memory.cpp
+    │   ├── Animation.cpp
+    │   ├── Physics.cpp
+    │   ├── DesktopWorld.cpp
+    │   ├── MouseSensor.cpp
+    │   ├── SystemSensor.cpp
+    │   └── SaveManager.cpp
+    ├── include/
+    │   ├── Pet.h
+    │   ├── PetBrain.h
+    │   ├── BehaviorTree.h
+    │   ├── Memory.h
+    │   ├── Animation.h
+    │   ├── Physics.h
+    │   ├── DesktopWorld.h
+    │   ├── MouseSensor.h
+    │   ├── SystemSensor.h
+    │   └── SaveManager.h
     ├── assets/
     │   ├── idle/
     │   ├── walk/
     │   ├── run/
     │   ├── sleep/
     │   └── reactions/
-    └── data/
-        └── pet_state.json
+    ├── data/
+    │   └── pet_state.json
+    └── config/
+        └── pet_config.json
 ```
 
 Asset folders contain `.gitkeep` files so Git retains the empty directories.

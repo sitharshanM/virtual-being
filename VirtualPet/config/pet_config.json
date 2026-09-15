@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "app": {
+    "title": "Virtual Pet",
+    "target_fps": 60,
+    "always_on_top": true,
+    "transparent_background": true,
+    "start_with_windows": false
+  },
+  "window": {
+    "width": 128,
+    "height": 128,
+    "scale": 2.0,
+    "initial_position": "tray_bottom_right"
+  },
+  "physics": {
+    "gravity": 980.0,
+    "ground_margin": 10,
+    "edge_bounce": 0.2,
+    "drag_smoothing": 0.15
+  },
+  "behavior": {
+    "tick_rate_hz": 10,
+    "idle_timeout_seconds": 30,
+    "energy_depletion_rate": 0.005,
+    "hunger_increase_rate": 0.008
+  },
+  "sensors": {
+    "mouse_proximity_distance_px": 150,
+    "detect_cursor_drag": true,
+    "idle_system_threshold_seconds": 120
+  },
+  "paths": {
+    "assets_dir": "assets",
+    "data_dir": "data",
+    "save_file": "data/pet_state.json"
+  }
+}
