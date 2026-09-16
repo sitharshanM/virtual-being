@@ -13,11 +13,6 @@ PetBrain::PetBrain() {
 void PetBrain::RequestAction(PetAction action, float duration) {
     m_currentAction = action;
     m_actionTimer = duration;
-#if 0 // SLEEP_MODULE_DISABLED: Manual sleep request
-    m_manualSleep = (action == PetAction::Sleeping);
-#else
-    m_manualSleep = false;
-#endif
     if (action == PetAction::ReactingToClick) {
         m_currentThought = "Blushing happily from your warm touch ❤️";
     }
@@ -26,7 +21,6 @@ void PetBrain::RequestAction(PetAction action, float duration) {
 void PetBrain::RequestReaction(std::string thought, float duration) {
     m_currentAction = PetAction::ReactingToClick;
     m_actionTimer = duration;
-    m_manualSleep = false;
     m_currentThought = std::move(thought);
 }
 
@@ -51,58 +45,38 @@ UtilityScores PetBrain::CalculateUtilityScores(const Memory& memory,
     const auto& toy = physics.GetToy();
     (void)system;
 
-#if 0 // SLEEP_MODULE_DISABLED: Sleep utility score based on clock hour and exhaustion
-    // 1. Sleep Utility: scales with exhaustion, real clock hour, and user inactivity.
-    //    Sleepiness peaks at ~02:00 and is near-zero at ~10:00, using a cosine curve
-    //    so the urge to sleep rises smoothly through the evening and fades by morning.
-    float exhaustion = 1.0f - needs.energy;
-    const int32_t hour   = system.GetState().currentHour;   // 0-23 from real clock
-    const int32_t minute = system.GetState().currentMinute; // 0-59
-    // Map clock to a float hour in [0, 24)
-    float clockH = static_cast<float>(hour) + static_cast<float>(minute) / 60.0f;
-    // Peak sleepiness at 02:00 (hour 2). Shift so peak maps to pi.
-    // sleepClock = 0.0 at 02:00 (peak), 1.0 at 14:00 (trough)
-    float angleRad = ((clockH - 2.0f) / 24.0f) * (2.0f * 3.14159265f);
-    float sleepClock = (1.0f - std::cos(angleRad)) * 0.5f; // [0=peak sleep, 1=most awake]
-    float clockMultiplier = 0.4f + (1.0f - sleepClock) * 1.4f; // [0.4 at 14:00, 1.8 at 02:00]
-    float idleMultiplier = system.IsUserIdle() ? 1.25f : 1.0f;
-    u.sleepScore = std::pow(exhaustion, 1.3f) * clockMultiplier * idleMultiplier * (0.75f + p.laziness * 0.4f);
-#else
-    u.sleepScore = 0.0f; // Sleep module disabled
-#endif
-
-    // 2. Coffee / Boba Break Utility
+    // 1. Coffee / Boba Break Utility
     if (toy.active && toy.isTreat) {
         u.eatScore = std::pow(needs.GetCoffeeCraving(), 1.1f) * 2.4f + 0.35f;
     } else {
         u.eatScore = std::pow(needs.GetCoffeeCraving(), 1.4f) * 0.55f;
     }
 
-    // 3. Plushie Play Utility
+    // 2. Plushie Play Utility
     if (toy.active && !toy.isTreat) {
         u.toyScore = (p.playfulness * 1.7f + 0.3f) * (0.5f + needs.energy * 0.5f);
     } else {
         u.toyScore = 0.0f;
     }
 
-    // 4. Cursor Follow / Peeking at what you're doing
+    // 3. Cursor Follow / Peeking at what you're doing
     if (mouse.IsNear() && !toy.active) {
         u.followScore = (p.playfulness * 0.6f + p.sweetness * 0.5f) * (0.4f + needs.trust * 0.6f);
     } else {
         u.followScore = 0.0f;
     }
 
-    // 5. Desktop Stroll / Window Exploration
+    // 4. Desktop Stroll / Window Exploration
     u.wanderScore = p.curiosity * 0.65f * (0.4f + needs.energy * 0.6f);
 
-    // 6. Study / Focus Mode
+    // 5. Study / Focus Mode
     if (m_studyModeTimer > 0.0f) {
         u.studyScore = 2.5f;
     } else {
         u.studyScore = 0.0f;
     }
 
-    // 7. Companion Idle (quietly sitting by your windows)
+    // 6. Companion Idle (quietly sitting by your windows)
     u.idleScore = 0.25f + (p.laziness * 0.35f);
 
     return u;
@@ -128,7 +102,6 @@ BrainDecision PetBrain::Update(float deltaTime,
 
     // 1. High Priority Direct Sensory Overrides
     if (physics.IsDragged()) {
-        m_manualSleep = false;
         m_currentAction = PetAction::Dragged;
         m_currentThought = "Kyaaa! Where are you taking me?! Put me down gently, okay? 💕";
         BrainDecision d;
@@ -141,7 +114,6 @@ BrainDecision PetBrain::Update(float deltaTime,
     }
 
     if (mouse.WasLeftButtonClicked()) {
-        m_manualSleep = false;
         const bool accepted = memory.GiveHeadpat(0.04f);
         m_currentAction = PetAction::ReactingToClick;
         float aff = memory.GetAffection();
@@ -170,21 +142,6 @@ BrainDecision PetBrain::Update(float deltaTime,
     }
 
     // 2. Evaluate Utility Curves for autonomous behavior
-#if 0 // SLEEP_MODULE_DISABLED: Manual sleep handling
-    if (m_manualSleep && memory.GetNeeds().energy < 0.95f) {
-        memory.Rest(deltaTime, 0.06f);
-        BrainDecision d;
-        d.action = PetAction::Sleeping;
-        d.animState = AnimationState::Sleep;
-        d.facingLeft = m_facingLeft;
-        m_currentThought = d.thought = system.IsNight()
-            ? "It's late... please get some rest too, sweetheart. Sweet dreams ❤️"
-            : "Zzz... taking a cozy little beauty nap by your taskbar.";
-        return d;
-    }
-    m_manualSleep = false;
-#endif
-
     if (m_scoreTimer <= 0.0f) {
         m_lastScores = CalculateUtilityScores(memory, mouse, system, physics);
         m_scoreTimer = m_tickInterval;
@@ -206,12 +163,6 @@ BrainDecision PetBrain::Update(float deltaTime,
             maxScore = m_lastScores.toyScore;
             chosenAction = PetAction::ChasingToy;
         }
-#if 0 // SLEEP_MODULE_DISABLED: Autonomous sleep choice
-        if (m_lastScores.sleepScore > maxScore && m_lastScores.sleepScore > 0.52f) {
-            maxScore = m_lastScores.sleepScore;
-            chosenAction = PetAction::Sleeping;
-        }
-#endif
         if (m_lastScores.followScore > maxScore && m_lastScores.followScore > 0.35f) {
             maxScore = m_lastScores.followScore;
             chosenAction = PetAction::FollowingCursor;
@@ -284,26 +235,6 @@ BrainDecision PetBrain::Update(float deltaTime,
             }
             break;
         }
-
-#if 0 // SLEEP_MODULE_DISABLED: Sleep action execution
-        case PetAction::Sleeping:
-            decision.animState = AnimationState::Sleep;
-            decision.targetHorizontalSpeed = 0.0f;
-            m_currentThought = system.IsNight()
-                ? "Past bedtime... please don't stay up too late for me. Let's rest soon ❤️"
-                : "Zzz... resting softly right beside your taskbar.";
-            memory.Rest(deltaTime, 0.06f);
-            if (memory.GetNeeds().energy >= 0.95f && !system.IsNight()) {
-                m_currentAction = PetAction::Idle;
-            }
-            break;
-#else
-        case PetAction::Sleeping:
-            decision.animState = AnimationState::Idle;
-            decision.targetHorizontalSpeed = 0.0f;
-            m_currentAction = PetAction::Idle;
-            break;
-#endif
 
         case PetAction::FollowingCursor: {
             float dx = static_cast<float>(cursor.x - (petPos.x + physics.GetWidth() / 2));

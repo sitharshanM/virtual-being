@@ -251,15 +251,7 @@ void TestRegressions() {
         EXPECT(pet.Init("pet_integration_config.json", "pet_integration_state.json"), "Pet initializes with explicit paths");
         EXPECT(pet.GetWidth() == 60 && pet.GetHeight() == 75 && !pet.GetMouseSensor().GetConfig().detectCursorDrag && pet.GetSystemSensor().GetIdleThreshold() == 42, "Pet applies loaded configuration");
         const float hunger = pet.GetMemory().GetNeeds().hunger;
-#if 0 // SLEEP_MODULE_DISABLED: Pet sleep transition test commented out
-        pet.Sleep();
-#endif
         pet.Update(0.2f);
-#if 0 // SLEEP_MODULE_DISABLED: Sleep state check
-        EXPECT(pet.GetAnimation().GetCurrentState() == AnimationState::Sleep ||
-               pet.GetAnimation().GetCurrentClipName() == "falling-asleep",
-               "Pet sleep transition survives full update");
-#endif
         EXPECT(std::abs(pet.GetMemory().GetNeeds().hunger - hunger - 0.0016f) < 0.00001f, "Low frame rate preserves elapsed simulation time");
         pet.Feed();
         pet.Update(0.016f);
@@ -293,12 +285,6 @@ void TestRegressions() {
     Physics physics;
     Memory memory;
     PetBrain brain;
-#if 0 // SLEEP_MODULE_DISABLED: Manual sleep decision test commented out
-    brain.RequestAction(PetAction::Sleeping);
-    const float before = memory.GetNeeds().energy;
-    auto decision = brain.Update(0.1f, mouse, system, memory, world, physics);
-    EXPECT(decision.animState == AnimationState::Sleep && memory.GetNeeds().energy > before, "Manual sleep persists and restores energy");
-#endif
     brain.RequestAction(PetAction::ReactingToClick);
     EXPECT(brain.Update(0.1f, mouse, system, memory, world, physics).animState == AnimationState::Reaction, "Manual reaction persists");
     physics.SetPosition(100,100);

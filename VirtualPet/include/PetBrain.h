@@ -18,7 +18,6 @@ enum class PetAction {
     Idle,
     Wandering,
     FollowingCursor,
-    Sleeping,
     Dragged,
     ReactingToClick,
     ChasingToy,
@@ -38,7 +37,6 @@ struct BrainDecision {
 
 /// Evaluated utility scores across candidate motivations.
 struct UtilityScores {
-    float sleepScore{0.0f};
     float eatScore{0.0f};
     float toyScore{0.0f};
     float followScore{0.0f};
@@ -90,7 +88,6 @@ private:
     float m_tickInterval{0.1f};
     float m_scoreTimer{0.0f};
     float m_contactCooldown{0.0f};
-    bool m_manualSleep{false};
     float m_actionDuration{4.0f};
     int32_t m_wanderTargetX{0};
     bool m_facingLeft{false};

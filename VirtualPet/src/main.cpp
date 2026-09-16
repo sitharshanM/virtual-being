@@ -33,7 +33,6 @@ constexpr UINT_PTR ID_MENU_HEADPAT        = 1002;
 constexpr UINT_PTR ID_MENU_FEED           = 1003;
 constexpr UINT_PTR ID_MENU_DROP_TOY       = 1004;
 constexpr UINT_PTR ID_MENU_STUDY          = 1005;
-constexpr UINT_PTR ID_MENU_SLEEP          = 1006;
 constexpr UINT_PTR ID_MENU_AUTOSTART      = 1007;
 constexpr UINT_PTR ID_MENU_EXIT           = 1008;
 constexpr int ID_CHAT_HISTORY = 2001;
@@ -243,9 +242,6 @@ void ShowPetContextMenu(HWND hwnd, POINT pt) {
     ::AppendMenuW(hMenu, MF_STRING, ID_MENU_FEED, L"Send &Coffee / Boba Break ☕");
     ::AppendMenuW(hMenu, MF_STRING, ID_MENU_DROP_TOY, L"Toss &Plushie Heart 🧸");
     ::AppendMenuW(hMenu, MF_STRING, ID_MENU_STUDY, L"&Study Together (Focus Mode) 📖");
-#if 0 // SLEEP_MODULE_DISABLED: Beauty nap tray menu item
-    ::AppendMenuW(hMenu, MF_STRING, ID_MENU_SLEEP, L"&Beauty Nap 💤");
-#endif
     ::AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
 
     bool autostart = VirtualPet::SaveManager::IsStartWithWindowsEnabled();
@@ -434,11 +430,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 case ID_MENU_STUDY:
                     if (g_pet) g_pet->StartStudyMode();
                     break;
-#if 0 // SLEEP_MODULE_DISABLED: Beauty nap command handler
-                case ID_MENU_SLEEP:
-                    if (g_pet) g_pet->BeautyNap();
-                    break;
-#endif
                 case ID_MENU_AUTOSTART: {
                     bool current = VirtualPet::SaveManager::IsStartWithWindowsEnabled();
                     VirtualPet::SaveManager::SetStartWithWindows(!current);

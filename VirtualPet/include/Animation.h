@@ -23,7 +23,6 @@ enum class AnimationState {
     Idle,
     Walk,
     Run,
-    Sleep,
     Reaction,
     Custom
 };
@@ -84,7 +83,7 @@ public:
     Animation();
     ~Animation();
 
-    // Non-copyable due to optional native image handles
+    // Non-copyable due to GDI+ handles
     Animation(const Animation&) = delete;
     Animation& operator=(const Animation&) = delete;
     Animation(Animation&&) = delete;
@@ -94,8 +93,7 @@ public:
     void Update(float deltaTime);
 
     /// Switches current animation clip to state.
-    /// @param state Target animation state.
-    /// @param restartIfSame If false, calling Play with already playing state continues playback.
+    /// @param restartIfSame If false, already-playing state continues without restart.
     void Play(AnimationState state, bool restartIfSame = false);
 
     /// Switches playback to a registered clip by name.
@@ -105,10 +103,35 @@ public:
     void RegisterClip(AnimationState state, AnimationClip clip);
     void RegisterClip(const std::string& name, AnimationClip clip);
 
-    /// Loads animation frames from the disk assets directory (e.g. assets/idle, assets/walk).
-    /// @param assetsDirectory Root assets folder path containing idle/, walk/, run/, sleep/, reactions/.
+    /// Loads animation frames from the disk assets directory.
+    /// @param assetsDirectory Root folder containing idle/, walk/, run/, reactions/.
     /// @return Number of clips loaded.
     size_t LoadFromDirectory(const std::string& assetsDirectory);
+
+    // -----------------------------------------------------------------------
+    // Sprite Sheet Loading
+    // -----------------------------------------------------------------------
+
+    /// Describes one animation clip's position in a sprite sheet grid.
+    struct SpriteSheetClipDef {
+        std::string clipName;             ///< Clip identifier (e.g. "idle", "walk", "run").
+        int32_t     row{0};               ///< Zero-based row in the sprite sheet grid.
+        int32_t     frameCount{6};        ///< Number of frames to read left-to-right from this row.
+        float       frameDuration{0.15f}; ///< Display time per frame in seconds.
+        bool        looping{true};        ///< Whether the clip loops.
+    };
+
+    /// Slices a single sprite-sheet PNG into named animation clips at runtime.
+    /// Each cell is cropped into an in-memory Bitmap — no individual frame files needed.
+    /// All clips rendered via RenderAlpha/Render are automatically drawn at SetRenderSize dimensions.
+    ///
+    /// @param sheetPath  Absolute path to the sprite sheet image.
+    /// @param cols       Number of columns in the grid (cell width = sheet width / cols).
+    /// @param rows       Number of rows in the grid (cell height = sheet height / rows).
+    /// @param clips      List of clip definitions mapping grid rows → clip names.
+    /// @return Number of clips successfully registered.
+    size_t LoadFromSpriteSheet(const std::string& sheetPath, int32_t cols, int32_t rows,
+                               const std::vector<SpriteSheetClipDef>& clips);
 
     // --- State & Playback Queries ---
 
@@ -121,7 +144,7 @@ public:
     [[nodiscard]] bool IsFacingLeft() const noexcept { return m_facingLeft; }
     void SetFacingLeft(bool facingLeft) noexcept { m_facingLeft = facingLeft; }
 
-    /// Sets the fixed render dimensions so all frames draw at the same size.
+    /// Sets the fixed render dimensions — all frames (from any clip) draw at this size.
     /// Must be called after the physics window size is configured.
     void SetRenderSize(int32_t width, int32_t height) noexcept { m_renderWidth = width; m_renderHeight = height; }
 
@@ -133,7 +156,6 @@ public:
 
 #ifdef _WIN32
     /// Renders current animation frame to the specified Windows device context.
-    /// Supports alpha blending and horizontal flipping based on facing direction.
     bool Render(HDC hdc, int32_t destX, int32_t destY, int32_t destWidth, int32_t destHeight);
     /// Draw into a top-down premultiplied BGRA surface for UpdateLayeredWindow.
     bool RenderAlpha(BYTE* pixels, int32_t width, int32_t height) const;
@@ -152,8 +174,8 @@ private:
     float m_playbackSpeed{1.0f};
     bool m_facingLeft{false};
     bool m_isFinished{false};
-    int32_t m_renderWidth{0};   ///< Fixed draw width (pixels); 0 = fall back to buffer width.
-    int32_t m_renderHeight{0};  ///< Fixed draw height (pixels); 0 = fall back to buffer height.
+    int32_t m_renderWidth{0};   ///< Fixed draw width; 0 = fall back to buffer width.
+    int32_t m_renderHeight{0};  ///< Fixed draw height; 0 = fall back to buffer height.
 
     AnimationCompleteCallback m_onComplete;
 };

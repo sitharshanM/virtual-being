@@ -17,7 +17,6 @@ const char* AnimationStateToString(AnimationState state) noexcept {
         case AnimationState::Idle:     return "idle";
         case AnimationState::Walk:     return "walk";
         case AnimationState::Run:      return "run";
-        case AnimationState::Sleep:    return "sleep";
         case AnimationState::Reaction: return "reactions";
         case AnimationState::Custom:   return "custom";
         default:                       return "idle";
@@ -28,7 +27,6 @@ AnimationState StringToAnimationState(const std::string& name) noexcept {
     if (name == "idle")      return AnimationState::Idle;
     if (name == "walk")      return AnimationState::Walk;
     if (name == "run")       return AnimationState::Run;
-    if (name == "sleep")     return AnimationState::Sleep;
     if (name == "reactions" || name == "reaction") return AnimationState::Reaction;
     return AnimationState::Custom;
 }
@@ -81,7 +79,6 @@ Animation::Animation() {
     RegisterClip(AnimationState::Idle, AnimationClip("idle", true));
     RegisterClip(AnimationState::Walk, AnimationClip("walk", true));
     RegisterClip(AnimationState::Run, AnimationClip("run", true));
-    RegisterClip(AnimationState::Sleep, AnimationClip("sleep", true));
     RegisterClip(AnimationState::Reaction, AnimationClip("reactions", false));
 
     m_currentClipName = "idle";
@@ -120,8 +117,41 @@ void Animation::PlayClip(const std::string& clipName, bool restartIfSame) {
     m_frameTimer = 0.0f;
     m_isFinished = false;
     if (clipName == "idle" || clipName == "walk" || clipName == "run" ||
-        clipName == "sleep" || clipName == "reaction") {
+        clipName == "reaction") {
         m_currentState = StringToAnimationState(clipName);
+    }
+}
+
+void Animation::Update(float deltaTime) {
+    auto it = m_clips.find(m_currentClipName);
+    if (it == m_clips.end() || it->second.IsEmpty()) {
+        return;
+    }
+
+    const AnimationClip& clip = it->second;
+    const AnimationFrame* frame = clip.GetFrame(m_currentFrameIndex);
+    if (!frame) return;
+
+    float duration = (frame->durationSeconds > 0.0f) ? frame->durationSeconds : 0.1f;
+    m_frameTimer += deltaTime;
+
+    while (m_frameTimer >= duration && duration > 0.0f) {
+        m_frameTimer -= duration;
+        m_currentFrameIndex++;
+
+        if (m_currentFrameIndex >= clip.GetFrameCount()) {
+            if (clip.IsLooping()) {
+                m_currentFrameIndex = 0;
+            } else {
+                m_currentFrameIndex = clip.GetFrameCount() - 1;
+                m_isFinished = true;
+                break;
+            }
+        }
+        frame = clip.GetFrame(m_currentFrameIndex);
+        if (frame) {
+            duration = (frame->durationSeconds > 0.0f) ? frame->durationSeconds : 0.1f;
+        }
     }
 }
 
@@ -131,41 +161,6 @@ const AnimationFrame* Animation::GetCurrentFrame() const noexcept {
         return it->second.GetFrame(m_currentFrameIndex);
     }
     return nullptr;
-}
-
-void Animation::Update(float deltaTime) {
-    if (!std::isfinite(deltaTime) || deltaTime <= 0) return;
-    auto it = m_clips.find(m_currentClipName);
-    if (it == m_clips.end()) {
-        return;
-    }
-
-    AnimationClip& clip = it->second;
-    const size_t frameCount = clip.GetFrameCount();
-    if (frameCount <= 1 && clip.IsLooping()) {
-        return;
-    }
-
-    if (m_isFinished) {
-        return;
-    }
-
-    if (frameCount == 0) return;
-    m_frameTimer += deltaTime * m_playbackSpeed;
-    if (clip.IsLooping() && clip.GetTotalDuration() > 0)
-        m_frameTimer = std::fmod(m_frameTimer, clip.GetTotalDuration());
-    while (m_frameTimer >= clip.GetFrame(m_currentFrameIndex)->durationSeconds) {
-        m_frameTimer -= clip.GetFrame(m_currentFrameIndex)->durationSeconds;
-        if (++m_currentFrameIndex >= frameCount) {
-            if (clip.IsLooping()) m_currentFrameIndex = 0;
-            else {
-                m_currentFrameIndex = frameCount - 1;
-                m_isFinished = true;
-                if (m_onComplete) m_onComplete(m_currentState);
-                return;
-            }
-        }
-    }
 }
 
 size_t Animation::LoadFromDirectory(const std::string& assetsDirectory) {
@@ -181,7 +176,6 @@ size_t Animation::LoadFromDirectory(const std::string& assetsDirectory) {
         {AnimationState::Idle, "idle"},
         {AnimationState::Walk, "walk"},
         {AnimationState::Run, "run"},
-        {AnimationState::Sleep, "sleep"},
         {AnimationState::Reaction, "reactions"}
     };
 
@@ -192,9 +186,7 @@ size_t Animation::LoadFromDirectory(const std::string& assetsDirectory) {
         }
 
         bool isLooping = (state != AnimationState::Reaction);
-        // Resting illustrations need longer holds than locomotion frames.
         const float frameDuration = state == AnimationState::Idle ? 0.25f
-                                  : state == AnimationState::Sleep ? 0.35f
                                   : state == AnimationState::Reaction ? 0.18f
                                   : state == AnimationState::Run ? 0.09f : 0.12f;
         AnimationClip clip(folderName, isLooping, frameDuration);
@@ -234,49 +226,30 @@ size_t Animation::LoadFromDirectory(const std::string& assetsDirectory) {
 
     // -----------------------------------------------------------------------
     // Per-clip timing + looping table.
-    // Each entry: { frameDurationSeconds, shouldLoop }
-    // Clips not listed fall back to { 0.14f, false }.
     // -----------------------------------------------------------------------
     struct ClipConfig { float frameDuration; bool looping; };
     static const std::unordered_map<std::string, ClipConfig> kClipTimings = {
-        // ── Sleep cycle ────────────────────────────────────────────────────
-        // Sheet 1: slow, easing-in drift into slumber
-        { "falling-asleep",       { 0.28f, false } },
-        // Sheet 2: single languid yawn — plays once, then sleep loop takes over
-        { "sleepy-yawning",       { 0.22f, false } },
-        // Reverse of falling-asleep: gentle stretch before resuming idle
-        { "waking-up",            { 0.22f, false } },
-        { "morning-stretch",      { 0.22f, false } },
-        { "evening-wind-down",    { 0.24f, false } },
-
         // ── Study / focus ──────────────────────────────────────────────────
-        // Sheet 3: calm page-turn rhythm — loops for the whole study session
         { "reading",              { 0.20f, true  } },
         { "studying",             { 0.20f, true  } },
         { "digital-drawing",      { 0.18f, true  } },
 
         // ── Conversation ───────────────────────────────────────────────────
-        // Sheet 4 (left half → thinking/pointing): attentive listener pace
         { "listening",            { 0.18f, false } },
-        // Sheet 4 (right half → smiling): speech-paced, slightly quicker
-        { "talking",              { 0.16f, false } },
+        { "talking",              { 0.14f, false } },
+        { "curious-tilt",         { 0.20f, false } },
+        { "thoughtful-nod",       { 0.20f, false } },
 
-        // ── Positive reactions ─────────────────────────────────────────────
-        // Sheet 5: upbeat celebratory pop
-        { "celebrating",          { 0.13f, false } },
-        { "goal-completed",       { 0.13f, false } },
-        { "happy-reunion",        { 0.13f, false } },
+        // ── Affection & Reactions ──────────────────────────────────────────
+        { "heart-flutter",        { 0.15f, false } },
+        { "shy-blush",            { 0.20f, false } },
+        { "happy-spin",           { 0.12f, false } },
+        { "proud-pose",           { 0.20f, false } },
+        { "warm-smile",           { 0.22f, false } },
 
-        // ── Affection / warmth ─────────────────────────────────────────────
-        { "shy-affection",        { 0.17f, false } },
-        { "comforting",           { 0.17f, false } },
-        { "matcha-drinking",      { 0.19f, false } },
-        { "apology-repair",       { 0.17f, false } },
-
-        // ── Negative / boundary states ─────────────────────────────────────
-        { "asking-for-space",     { 0.19f, false } },
-        { "pouting",              { 0.21f, false } },
-        { "creative-frustration", { 0.19f, false } },
+        // ── Boundaries & Needs ─────────────────────────────────────────────
+        { "gentle-boundaries",    { 0.20f, false } },
+        { "pouting-coffee",       { 0.22f, false } },
         { "tired-encouragement",  { 0.22f, false } },
 
         // ── Playful ────────────────────────────────────────────────────────
@@ -289,8 +262,7 @@ size_t Animation::LoadFromDirectory(const std::string& assetsDirectory) {
             continue;
         }
         const std::string name = entry.path().filename().string();
-        if (name == "idle" || name == "walk" || name == "run" ||
-            name == "sleep" || name == "reactions") {
+        if (name == "idle" || name == "walk" || name == "run" || name == "reactions") {
             continue;
         }
 
@@ -305,29 +277,25 @@ size_t Animation::LoadFromDirectory(const std::string& assetsDirectory) {
 
         AnimationClip clip(name, shouldLoop, frameDuration);
         std::vector<fs::path> files;
-        for (const auto& image : fs::directory_iterator(entry.path(), ec)) {
-            std::string ext = image.path().extension().string();
-            std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) {
-                return static_cast<char>(std::tolower(c));
-            });
-            if (image.is_regular_file(ec) &&
-                (ext == ".png" || ext == ".bmp" || ext == ".jpg" || ext == ".jpeg")) {
-                files.push_back(image.path());
+        for (const auto& img : fs::directory_iterator(entry.path(), ec)) {
+            if (img.is_regular_file(ec)) {
+                std::string ext = img.path().extension().string();
+                std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                if (ext == ".png" || ext == ".bmp" || ext == ".jpg" || ext == ".jpeg") {
+                    files.push_back(img.path());
+                }
             }
         }
         std::sort(files.begin(), files.end());
-        for (const auto& path : files) {
+
+        for (const auto& filePath : files) {
             AnimationFrame frame;
-            frame.filePath = path.string();
+            frame.filePath = filePath.string();
             frame.durationSeconds = frameDuration;
 #ifdef _WIN32
-            if (!m_gdiToken) {
-                continue;
-            }
-            frame.bitmap = std::make_shared<Gdiplus::Bitmap>(path.c_str());
-            if (frame.bitmap->GetLastStatus() != Gdiplus::Ok) {
-                continue;
-            }
+            if (!m_gdiToken) continue;
+            frame.bitmap = std::make_shared<Gdiplus::Bitmap>(filePath.c_str());
+            if (frame.bitmap->GetLastStatus() != Gdiplus::Ok) continue;
             frame.width  = static_cast<int32_t>(frame.bitmap->GetWidth());
             frame.height = static_cast<int32_t>(frame.bitmap->GetHeight());
 #endif
@@ -418,8 +386,6 @@ bool Animation::RenderAlpha(BYTE* pixels, int32_t width, int32_t height) const {
     Gdiplus::ImageAttributes attributes;
     attributes.SetWrapMode(Gdiplus::WrapModeTileFlipXY);
     // Always draw at the configured render dimensions (m_renderWidth x m_renderHeight).
-    // Using frame->width/height as the draw size caused sleep frames with larger native
-    // PNG dimensions to appear visually bigger than idle/walk frames.
     int32_t drawW = (m_renderWidth  > 0) ? m_renderWidth  : width;
     int32_t drawH = (m_renderHeight > 0) ? m_renderHeight : height;
     return graphics.DrawImage(frame->bitmap.get(), Gdiplus::Rect(0, 0, drawW, drawH),

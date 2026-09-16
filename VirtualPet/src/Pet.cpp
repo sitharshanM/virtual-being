@@ -56,7 +56,7 @@ bool Pet::Init(const std::string& configPath, const std::string& statePath) {
     int32_t scaledW = static_cast<int32_t>(m_config.windowWidth * m_config.windowScale);
     int32_t scaledH = static_cast<int32_t>(m_config.windowHeight * m_config.windowScale);
     m_physics.SetDimensions(scaledW, scaledH);
-    m_animation.SetRenderSize(scaledW, scaledH); // Pin all clips to this size — prevents sleep frames from growing
+    m_animation.SetRenderSize(scaledW, scaledH); // Pin all clips to this fixed size
 
     m_memory.SetDecayRates(m_config.energyDepletionRate, m_config.hungerIncreaseRate);
     m_mouseSensor.SetProximityDistance(m_config.mouseProximityDistancePx);
@@ -78,16 +78,12 @@ bool Pet::Init(const std::string& configPath, const std::string& statePath) {
         namespace fs = std::filesystem;
         std::string sheetPath = m_config.assetsDir + "/spritesheet.png";
         if (fs::exists(sheetPath)) {
-            // Layout matches the shared 6×9 companion sprite sheet
-            // Rows: 0=idle, 1=walk, 2=run, 3=sleep, 4=reactions,
-            //       5=sitting-idle, 6=resting, 7=stretch, 8=special
+            // Rows: 0=idle, 1=walk, 2=run, 3=reactions,
+            //       4=sitting-idle, 5=resting, 6=stretch, 7=special
             const std::vector<Animation::SpriteSheetClipDef> sheetDefs = {
                 { "idle",         0, 6, 0.18f, true  },
                 { "walk",         1, 6, 0.12f, true  },
                 { "run",          2, 6, 0.08f, true  },
-#if 0 // SLEEP_MODULE_DISABLED: Sleep animation clip loading from sprite sheet
-                { "sleep",        3, 6, 0.25f, true  },
-#endif
                 { "reactions",    4, 6, 0.15f, false },
                 { "sitting-idle", 5, 6, 0.20f, true  },
                 { "resting",      6, 6, 0.22f, true  },
@@ -215,22 +211,6 @@ void Pet::UpdateStep(float deltaTime) {
     const PetAction currentAction = decision.action;
 
     if (currentAction != m_prevAction) {
-#if 0 // SLEEP_MODULE_DISABLED: Sleep animation sequencing
-        // ── Entering sleep ────────────────────────────────────────────────
-        // Sheet 1 (falling-asleep, 8×0.28s ≈ 2.24s) bridges idle → sleep loop.
-        if (currentAction == PetAction::Sleeping && m_prevAction != PetAction::Sleeping) {
-            constexpr float kFallAsleepDuration = 8 * 0.28f; // matches frame count × frame duration
-            PlaySpecialAnimation("falling-asleep", kFallAsleepDuration);
-        }
-
-        // ── Leaving sleep ─────────────────────────────────────────────────
-        // waking-up plays once (8×0.22s ≈ 1.76s) then idle resumes.
-        if (m_prevAction == PetAction::Sleeping && currentAction != PetAction::Sleeping) {
-            constexpr float kWakingUpDuration = 8 * 0.22f;
-            PlaySpecialAnimation("waking-up", kWakingUpDuration);
-        }
-#endif
-
         // ── Entering study mode ───────────────────────────────────────────
         // Sheet 3 (reading) loops for the whole session; we give it a long
         // timer so it won't be interrupted by the idle fallback.
@@ -325,18 +305,6 @@ void Pet::StartStudyMode(float duration) {
     m_studyAnimActive = false; // reset so the entering-study-mode branch fires fresh
     // The reading loop will be triggered automatically once the brain
     // transitions to StudyMode in the next UpdateStep call.
-}
-
-void Pet::BeautyNap() {
-#if 0 // SLEEP_MODULE_DISABLED: Manual beauty nap trigger
-    m_brain.RequestAction(PetAction::Sleeping);
-    // Play a brief yawn before the brain's sleep state kicks in.
-    // sleepy-yawning (Sheet 2): 8 frames × 0.22s = 1.76s
-    constexpr float kYawnDuration = 8 * 0.22f;
-    PlaySpecialAnimation("sleepy-yawning", kYawnDuration);
-    // falling-asleep will be queued automatically when PetAction::Sleeping
-    // is detected in UpdateStep on the next action-transition frame.
-#endif
 }
 
 void Pet::DropToy(bool isTreat) {

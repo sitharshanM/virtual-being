@@ -97,9 +97,6 @@ public:
     /// Enters study/focus mode with you, quietly sitting beside your work.
     void StudyTogether(float duration = 1.0f);
 
-    /// Allows her to take a peaceful beauty nap, recovering energy.
-    void Rest(float deltaTime, float recoveryRate = 0.05f);
-
     // Legacy wrappers for subsystem compatibility
     void Feed(float amount = 0.35f) { ShareCoffee(amount); }
     void Play(float enjoyment = 0.2f) { TossPlushie(enjoyment); }
