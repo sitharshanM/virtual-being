@@ -3,6 +3,7 @@
 #include "../include/Memory.h"
 #include "../include/Physics.h"
 #include "../include/SaveManager.h"
+#include "../include/CompanionLife.h"
 
 #include <cassert>
 #include <cmath>
@@ -37,6 +38,8 @@ void TestSaveManager() {
     original.name = "TestPet";
     original.needs.energy = 0.42f;
     original.needs.hunger = 0.88f;
+    original.identity.personalGoal = "paint a tiny comet journal";
+    original.identity.goalProgress = 0.37f;
 
     // Test Validation
     EXPECT(sm.Validate(original), "Default state should be valid");
@@ -52,6 +55,9 @@ void TestSaveManager() {
     EXPECT(loaded.name == "TestPet", "Name should match saved value");
     EXPECT(std::abs(loaded.needs.energy - 0.42f) < 0.05f, "Energy should match saved value");
     EXPECT(std::abs(loaded.needs.hunger - 0.88f) < 0.05f, "Hunger should match saved value");
+    EXPECT(loaded.identity.personalGoal == original.identity.personalGoal &&
+           std::abs(loaded.identity.goalProgress - 0.37f) < 0.001f,
+           "Independent goal should persist");
 
     // Clean up temporary test file
     std::remove("test_temp_state.json");
@@ -138,26 +144,66 @@ void TestPhysics() {
 }
 
 void TestMemory() {
-    std::cout << "Running TestMemory...\n";
+    std::cout << "Running TestMemory (Girlfriend Relationship)...\n";
     Memory mem;
 
     // Test initial bounds
     EXPECT(mem.GetNeeds().energy >= 0.0f && mem.GetNeeds().energy <= 1.0f, "Energy in range");
-    EXPECT(mem.GetNeeds().hunger >= 0.0f && mem.GetNeeds().hunger <= 1.0f, "Hunger in range");
+    EXPECT(mem.GetNeeds().hunger >= 0.0f && mem.GetNeeds().hunger <= 1.0f, "Coffee craving in range");
+    EXPECT(mem.GetAffection() >= 0.0f && mem.GetAffection() <= 1.0f, "Affection in range");
 
-    // Test feeding
-    float prevHunger = mem.GetNeeds().hunger;
-    mem.Feed(0.2f);
-    EXPECT(mem.GetNeeds().hunger < prevHunger, "Hunger should decrease after feeding");
+    // Test relationship tier progression
+    EXPECT(mem.GetRelationshipTier() == RelationshipTier::Acquaintance, "Relationship starts naturally as acquaintances");
+    EXPECT(!mem.GetRelationshipTitle().empty(), "Relationship tier title is formatted");
 
-    // Test play
+    // Test headpats
     float prevMood = mem.GetNeeds().mood;
-    mem.Play(0.1f);
-    EXPECT(mem.GetNeeds().mood >= prevMood, "Mood should increase after playing");
+    float prevAffection = mem.GetAffection();
+    int32_t prevHeadpats = mem.GetHistory().timesPetted;
+    mem.GiveHeadpat(0.04f);
+    EXPECT(mem.GetNeeds().mood >= prevMood, "Mood increases with headpats");
+    EXPECT(mem.GetAffection() >= prevAffection, "Affection deepens with headpats");
+    EXPECT(mem.GetHistory().timesPetted == prevHeadpats + 1, "Headpats counter increments");
+    EXPECT(!mem.GetIdentity().personalGoal.empty(), "Companion has her own persistent goal");
+    EXPECT(!mem.GetMoodTitle().empty(), "Changing emotional state has a readable mood");
+
+    // Repetitive attention eventually triggers an honest boundary instead of infinite rewards.
+    for (int i = 0; i < 8; ++i) mem.GiveHeadpat(0.01f);
+    EXPECT(!mem.WasLastInteractionAccepted(), "Repeated attention can trigger a boundary");
+    EXPECT(mem.GetHistory().boundariesExpressed > 0, "Expressed boundaries are remembered");
+
+    // Test coffee & boba dates
+    float prevCraving = mem.GetNeeds().GetCoffeeCraving();
+    int32_t prevDates = mem.GetHistory().timesFed;
+    mem.ShareCoffee(0.2f);
+    EXPECT(mem.GetNeeds().GetCoffeeCraving() < prevCraving, "Craving decreases after coffee break");
+    EXPECT(mem.GetHistory().timesFed == prevDates + 1, "Coffee dates counter increments");
+
+    // Test study sessions
+    int32_t prevStudy = mem.GetHistory().studySessionsTogether;
+    mem.StudyTogether(1.0f);
+    EXPECT(mem.GetHistory().studySessionsTogether == prevStudy + 1, "Study sessions counter increments");
 
     // Test clamping
-    mem.Feed(10.0f);
-    EXPECT(mem.GetNeeds().hunger == 0.0f, "Hunger should clamp at 0.0 minimum");
+    mem.ShareCoffee(10.0f);
+    EXPECT(mem.GetNeeds().GetCoffeeCraving() == 0.0f, "Coffee craving clamps at 0.0 minimum");
+}
+
+void TestCompanionLife() {
+    CompanionLife life; life.SetPath("life_test.json");
+    life.AddTurn("user","remember I like jazz"); life.RememberFact("user likes jazz");
+    life.AddDiaryEntry("We shared a quiet test moment."); life.SetUnresolvedIssue("a small misunderstanding");
+    EXPECT(life.Save(), "Companion memory saves");
+    CompanionLife loaded; loaded.SetPath("life_test.json");
+    EXPECT(loaded.Load(), "Companion memory loads");
+    EXPECT(loaded.BuildMemoryContext().find("jazz") != std::string::npos, "Remembered facts survive restart");
+    EXPECT(loaded.GetUnresolvedIssue() == "a small misunderstanding", "Unresolved issues survive restart");
+    EXPECT(!std::filesystem::exists("life_test.json.tmp"), "Atomic save leaves no temporary file");
+    { std::ofstream oversized("life_oversized.json", std::ios::binary); oversized.seekp(1024 * 1024); oversized.put('x'); }
+    CompanionLife rejected; rejected.SetPath("life_oversized.json");
+    EXPECT(!rejected.Load(), "Oversized companion history is rejected");
+    std::filesystem::remove("life_test.json");
+    std::filesystem::remove("life_oversized.json");
 }
 
 void TestRegressions() {
@@ -193,6 +239,8 @@ void TestRegressions() {
     EXPECT(sm.LoadConfig("regression_config.json", cfg), "Partial config accepts defaults");
     EXPECT(cfg.targetFps == 30 && !cfg.alwaysOnTop && !cfg.detectCursorDrag && cfg.tickRateHz == 20 && cfg.idleSystemThresholdSeconds == 42 && cfg.assetsDir == "art", "Config fields parsed");
     EXPECT(fs::path(cfg.saveFile) == fs::path("progress") / "pet_state.json", "Data directory sets default save path");
+    EXPECT(!cfg.localLlmUseWindowTitle && !cfg.localLlmUseClipboard,
+           "Sensitive context capture is opt-in by default");
     { std::ofstream f("regression_config.json"); f << R"({"window":{"scale":-5}})"; }
     EXPECT(!sm.LoadConfig("regression_config.json", cfg) && cfg.windowScale == 2, "Invalid config returns clean defaults");
     fs::remove("regression_config.json");
@@ -203,16 +251,34 @@ void TestRegressions() {
         EXPECT(pet.Init("pet_integration_config.json", "pet_integration_state.json"), "Pet initializes with explicit paths");
         EXPECT(pet.GetWidth() == 60 && pet.GetHeight() == 75 && !pet.GetMouseSensor().GetConfig().detectCursorDrag && pet.GetSystemSensor().GetIdleThreshold() == 42, "Pet applies loaded configuration");
         const float hunger = pet.GetMemory().GetNeeds().hunger;
+#if 0 // SLEEP_MODULE_DISABLED: Pet sleep transition test commented out
         pet.Sleep();
+#endif
         pet.Update(0.2f);
-        EXPECT(pet.GetAnimation().GetCurrentState() == AnimationState::Sleep, "Pet sleep survives full update");
+#if 0 // SLEEP_MODULE_DISABLED: Sleep state check
+        EXPECT(pet.GetAnimation().GetCurrentState() == AnimationState::Sleep ||
+               pet.GetAnimation().GetCurrentClipName() == "falling-asleep",
+               "Pet sleep transition survives full update");
+#endif
         EXPECT(std::abs(pet.GetMemory().GetNeeds().hunger - hunger - 0.0016f) < 0.00001f, "Low frame rate preserves elapsed simulation time");
         pet.Feed();
         pet.Update(0.016f);
         EXPECT(pet.GetAnimation().GetCurrentState() == AnimationState::Reaction, "Pet feeding reaction survives full update");
+
+        // Test girlfriend companion interactions
+        pet.GiveHeadpat();
+        pet.Update(0.016f);
+        EXPECT(pet.GetAnimation().GetCurrentState() == AnimationState::Reaction, "Headpat triggers heart reaction");
+
+        pet.StartStudyMode(60.0f);
+        EXPECT(pet.GetBrain().IsInStudyMode(), "Study mode activates successfully");
+
+        pet.TossPlushieHeart();
+        EXPECT(pet.GetPhysics().GetToy().active && !pet.GetPhysics().GetToy().isTreat, "Plushie heart spawned in physics world");
     }
     fs::remove("pet_integration_config.json");
     fs::remove("pet_integration_state.json");
+    fs::remove("companion_life.json");
 
     MouseSensor mouse;
     mouse.OnButtonDown(true, Point(10,10), Rect(0,0,100,100));
@@ -227,10 +293,12 @@ void TestRegressions() {
     Physics physics;
     Memory memory;
     PetBrain brain;
+#if 0 // SLEEP_MODULE_DISABLED: Manual sleep decision test commented out
     brain.RequestAction(PetAction::Sleeping);
     const float before = memory.GetNeeds().energy;
     auto decision = brain.Update(0.1f, mouse, system, memory, world, physics);
     EXPECT(decision.animState == AnimationState::Sleep && memory.GetNeeds().energy > before, "Manual sleep persists and restores energy");
+#endif
     brain.RequestAction(PetAction::ReactingToClick);
     EXPECT(brain.Update(0.1f, mouse, system, memory, world, physics).animState == AnimationState::Reaction, "Manual reaction persists");
     physics.SetPosition(100,100);
@@ -295,6 +363,28 @@ void TestRegressions() {
     fs::remove("sprite_fixture/idle/02.png");
     fs::remove("sprite_fixture/idle");
     fs::remove("sprite_fixture");
+    {
+        Animation sprites;
+        AnimationFrame frame;
+        frame.width = 2;
+        frame.height = 1;
+        frame.bitmap = std::make_shared<Gdiplus::Bitmap>(2, 1, PixelFormat32bppARGB);
+        frame.bitmap->SetPixel(0, 0, Gdiplus::Color(128, 200, 0, 0));
+        frame.bitmap->SetPixel(1, 0, Gdiplus::Color(0, 0, 0, 0));
+        AnimationClip clip("alpha", true);
+        clip.AddFrame(frame);
+        sprites.RegisterClip("alpha", std::move(clip));
+        sprites.PlayClip("alpha");
+        BYTE pixels[8]{};
+        EXPECT(sprites.RenderAlpha(pixels, 2, 1), "Alpha surface renders");
+        EXPECT(pixels[0] == 0 && pixels[1] == 0 && std::abs(int(pixels[2]) - 100) <= 1
+            && pixels[3] == 128, "Soft edges retain premultiplied alpha without magenta");
+        EXPECT(pixels[4] == 0 && pixels[5] == 0 && pixels[6] == 0 && pixels[7] == 0,
+            "Transparent background remains clear");
+        sprites.SetFacingLeft(true);
+        EXPECT(sprites.RenderAlpha(pixels, 2, 1) && pixels[3] == 0 && pixels[7] == 128,
+            "Horizontal flip preserves alpha");
+    }
 #endif
 }
 
@@ -312,6 +402,7 @@ int main() {
     TestBehaviorTree();
     TestPhysics();
     TestMemory();
+    TestCompanionLife();
     TestRegressions();
 
     std::cout << "\n----------------------------------------\n";

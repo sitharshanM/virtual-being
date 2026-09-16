@@ -8,6 +8,7 @@ Memory::Memory(PetStateData initialData)
 void Memory::Update(float deltaTime, int32_t clockHour) {
     if (deltaTime <= 0.0f) return;
 
+#if 0 // SLEEP_MODULE_DISABLED: Clock-aware energy model
     // --- Clock-aware energy model ---
     // Sleep hours (22:00 - 06:00): passive energy recovery, no decay.
     // Active daytime (07:00 - 17:59): normal decay.
@@ -23,6 +24,11 @@ void Memory::Update(float deltaTime, int32_t clockHour) {
         float energyModifier = 1.0f + (m_data.personality.playfulness * 0.2f) - (m_data.personality.laziness * 0.2f);
         m_data.needs.energy -= (m_energyDepletionRate * energyModifier * timeOfDayModifier * deltaTime);
     }
+#else
+    (void)clockHour;
+    // With sleep disabled, keep energy at full so pet never suffers exhaustion or gets sleepy
+    m_data.needs.energy = 1.0f;
+#endif
 
     // Coffee / boba cravings build gradually over time
     m_data.needs.hunger += (m_hungerIncreaseRate * deltaTime);
@@ -50,7 +56,9 @@ void Memory::Update(float deltaTime, int32_t clockHour) {
 }
 
 std::string Memory::GetMoodTitle() const {
+#if 0 // SLEEP_MODULE_DISABLED: "sleepy" mood title
     if (m_data.needs.energy < 0.22f) return "sleepy";
+#endif
     if (m_data.needs.hunger > 0.78f) return "craving a quiet break";
     if (m_data.needs.comfort < 0.28f) return "guarded";
     if (m_data.needs.mood < 0.35f) return "a little withdrawn";

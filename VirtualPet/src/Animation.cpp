@@ -343,6 +343,65 @@ size_t Animation::LoadFromDirectory(const std::string& assetsDirectory) {
 }
 
 #ifdef _WIN32
+size_t Animation::LoadFromSpriteSheet(const std::string& sheetPath,
+                                      int32_t cols, int32_t rows,
+                                      const std::vector<SpriteSheetClipDef>& clips) {
+    if (cols <= 0 || rows <= 0 || clips.empty()) return 0;
+
+    // Convert narrow path to wide for GDI+
+    std::wstring widePath(sheetPath.begin(), sheetPath.end());
+    auto sheet = std::make_shared<Gdiplus::Bitmap>(widePath.c_str());
+    if (!sheet || sheet->GetLastStatus() != Gdiplus::Ok) {
+        std::cerr << "[Animation] Failed to load sprite sheet: " << sheetPath << "\n";
+        return 0;
+    }
+
+    const int32_t sheetW = static_cast<int32_t>(sheet->GetWidth());
+    const int32_t sheetH = static_cast<int32_t>(sheet->GetHeight());
+    const int32_t cellW  = sheetW / cols;
+    const int32_t cellH  = sheetH / rows;
+    if (cellW <= 0 || cellH <= 0) return 0;
+
+    size_t loadedCount = 0;
+
+    for (const auto& def : clips) {
+        if (def.row < 0 || def.row >= rows || def.frameCount <= 0) continue;
+
+        AnimationClip clip(def.clipName, def.looping, def.frameDuration);
+
+        for (int32_t col = 0; col < def.frameCount && col < cols; ++col) {
+            // Crop this cell out of the sheet into a new Bitmap
+            auto cell = std::make_shared<Gdiplus::Bitmap>(cellW, cellH, PixelFormat32bppPARGB);
+            if (!cell || cell->GetLastStatus() != Gdiplus::Ok) continue;
+
+            Gdiplus::Graphics g(cell.get());
+            g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+            g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
+            // Blit the source cell into the destination bitmap
+            g.DrawImage(sheet.get(),
+                Gdiplus::Rect(0, 0, cellW, cellH),        // dest: entire cell bitmap
+                col * cellW, def.row * cellH, cellW, cellH, // src: one grid cell
+                Gdiplus::UnitPixel);
+
+            AnimationFrame frame;
+            frame.durationSeconds = def.frameDuration;
+            frame.bitmap          = cell;
+            frame.width           = cellW;
+            frame.height          = cellH;
+            clip.AddFrame(frame);
+        }
+
+        if (!clip.IsEmpty()) {
+            RegisterClip(def.clipName, std::move(clip));
+            loadedCount++;
+        }
+    }
+
+    return loadedCount;
+}
+#endif
+
+#ifdef _WIN32
 bool Animation::RenderAlpha(BYTE* pixels, int32_t width, int32_t height) const {
     const auto* frame = GetCurrentFrame();
     if (!pixels || width <= 0 || height <= 0 || !frame || !frame->bitmap) return false;

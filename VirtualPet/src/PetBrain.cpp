@@ -13,7 +13,11 @@ PetBrain::PetBrain() {
 void PetBrain::RequestAction(PetAction action, float duration) {
     m_currentAction = action;
     m_actionTimer = duration;
+#if 0 // SLEEP_MODULE_DISABLED: Manual sleep request
     m_manualSleep = (action == PetAction::Sleeping);
+#else
+    m_manualSleep = false;
+#endif
     if (action == PetAction::ReactingToClick) {
         m_currentThought = "Blushing happily from your warm touch ❤️";
     }
@@ -45,7 +49,9 @@ UtilityScores PetBrain::CalculateUtilityScores(const Memory& memory,
     const auto& needs = memory.GetNeeds();
     const auto& p = memory.GetPersonality();
     const auto& toy = physics.GetToy();
+    (void)system;
 
+#if 0 // SLEEP_MODULE_DISABLED: Sleep utility score based on clock hour and exhaustion
     // 1. Sleep Utility: scales with exhaustion, real clock hour, and user inactivity.
     //    Sleepiness peaks at ~02:00 and is near-zero at ~10:00, using a cosine curve
     //    so the urge to sleep rises smoothly through the evening and fades by morning.
@@ -61,6 +67,9 @@ UtilityScores PetBrain::CalculateUtilityScores(const Memory& memory,
     float clockMultiplier = 0.4f + (1.0f - sleepClock) * 1.4f; // [0.4 at 14:00, 1.8 at 02:00]
     float idleMultiplier = system.IsUserIdle() ? 1.25f : 1.0f;
     u.sleepScore = std::pow(exhaustion, 1.3f) * clockMultiplier * idleMultiplier * (0.75f + p.laziness * 0.4f);
+#else
+    u.sleepScore = 0.0f; // Sleep module disabled
+#endif
 
     // 2. Coffee / Boba Break Utility
     if (toy.active && toy.isTreat) {
@@ -161,6 +170,7 @@ BrainDecision PetBrain::Update(float deltaTime,
     }
 
     // 2. Evaluate Utility Curves for autonomous behavior
+#if 0 // SLEEP_MODULE_DISABLED: Manual sleep handling
     if (m_manualSleep && memory.GetNeeds().energy < 0.95f) {
         memory.Rest(deltaTime, 0.06f);
         BrainDecision d;
@@ -173,6 +183,7 @@ BrainDecision PetBrain::Update(float deltaTime,
         return d;
     }
     m_manualSleep = false;
+#endif
 
     if (m_scoreTimer <= 0.0f) {
         m_lastScores = CalculateUtilityScores(memory, mouse, system, physics);
@@ -195,10 +206,12 @@ BrainDecision PetBrain::Update(float deltaTime,
             maxScore = m_lastScores.toyScore;
             chosenAction = PetAction::ChasingToy;
         }
+#if 0 // SLEEP_MODULE_DISABLED: Autonomous sleep choice
         if (m_lastScores.sleepScore > maxScore && m_lastScores.sleepScore > 0.52f) {
             maxScore = m_lastScores.sleepScore;
             chosenAction = PetAction::Sleeping;
         }
+#endif
         if (m_lastScores.followScore > maxScore && m_lastScores.followScore > 0.35f) {
             maxScore = m_lastScores.followScore;
             chosenAction = PetAction::FollowingCursor;
@@ -272,6 +285,7 @@ BrainDecision PetBrain::Update(float deltaTime,
             break;
         }
 
+#if 0 // SLEEP_MODULE_DISABLED: Sleep action execution
         case PetAction::Sleeping:
             decision.animState = AnimationState::Sleep;
             decision.targetHorizontalSpeed = 0.0f;
@@ -283,6 +297,13 @@ BrainDecision PetBrain::Update(float deltaTime,
                 m_currentAction = PetAction::Idle;
             }
             break;
+#else
+        case PetAction::Sleeping:
+            decision.animState = AnimationState::Idle;
+            decision.targetHorizontalSpeed = 0.0f;
+            m_currentAction = PetAction::Idle;
+            break;
+#endif
 
         case PetAction::FollowingCursor: {
             float dx = static_cast<float>(cursor.x - (petPos.x + physics.GetWidth() / 2));
