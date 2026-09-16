@@ -1,16 +1,17 @@
 cmake_minimum_required(VERSION 3.15)
 project(VirtualPet LANGUAGES CXX)
+include(GNUInstallDirs)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include(CTest)
 add_library(PetCore
-    src/Animation.cpp src/BehaviorTree.cpp src/DesktopWorld.cpp src/Memory.cpp
-    src/MouseSensor.cpp src/Pet.cpp src/PetBrain.cpp src/Physics.cpp
+    src/Animation.cpp src/BehaviorTree.cpp src/CompanionLife.cpp src/DesktopWorld.cpp src/Memory.cpp
+    src/MouseSensor.cpp src/LocalLLM.cpp src/Pet.cpp src/PetBrain.cpp src/Physics.cpp
     src/SaveManager.cpp src/SystemSensor.cpp)
 target_include_directories(PetCore PUBLIC include PRIVATE third_party)
 if(WIN32)
-    target_compile_definitions(PetCore PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
-    target_link_libraries(PetCore PUBLIC user32 gdi32 gdiplus shell32 advapi32)
+    target_compile_definitions(PetCore PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00 WINVER=0x0A00)
+    target_link_libraries(PetCore PUBLIC user32 gdi32 gdiplus shell32 advapi32 winhttp)
 endif()
 if(MSVC)
     target_compile_options(PetCore PRIVATE /W4)
@@ -27,3 +28,14 @@ if(BUILD_TESTING)
     target_link_libraries(VirtualPetTests PRIVATE PetCore)
     add_test(NAME CoreSubsystemsTest COMMAND VirtualPetTests)
 endif()
+
+install(TARGETS VirtualPet RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(DIRECTORY config assets DESTINATION ${CMAKE_INSTALL_BINDIR})
+set(CPACK_PACKAGE_NAME "VirtualPet")
+set(CPACK_PACKAGE_VENDOR "VirtualBeing")
+set(CPACK_PACKAGE_VERSION "1.0.0")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "VirtualPet")
+if(WIN32)
+    set(CPACK_GENERATOR "ZIP")
+endif()
+include(CPack)

@@ -119,7 +119,10 @@ void Animation::PlayClip(const std::string& clipName, bool restartIfSame) {
     m_currentFrameIndex = 0;
     m_frameTimer = 0.0f;
     m_isFinished = false;
-    m_currentState = StringToAnimationState(clipName);
+    if (clipName == "idle" || clipName == "walk" || clipName == "run" ||
+        clipName == "sleep" || clipName == "reaction") {
+        m_currentState = StringToAnimationState(clipName);
+    }
 }
 
 const AnimationFrame* Animation::GetCurrentFrame() const noexcept {
@@ -189,7 +192,12 @@ size_t Animation::LoadFromDirectory(const std::string& assetsDirectory) {
         }
 
         bool isLooping = (state != AnimationState::Reaction);
-        AnimationClip clip(folderName, isLooping);
+        // Resting illustrations need longer holds than locomotion frames.
+        const float frameDuration = state == AnimationState::Idle ? 0.25f
+                                  : state == AnimationState::Sleep ? 0.35f
+                                  : state == AnimationState::Reaction ? 0.18f
+                                  : state == AnimationState::Run ? 0.09f : 0.12f;
+        AnimationClip clip(folderName, isLooping, frameDuration);
 
         std::vector<fs::path> imageFiles;
         for (const auto& entry : fs::directory_iterator(folderPath, ec)) {
@@ -207,6 +215,7 @@ size_t Animation::LoadFromDirectory(const std::string& assetsDirectory) {
         for (const auto& filePath : imageFiles) {
             AnimationFrame frame;
             frame.filePath = filePath.string();
+            frame.durationSeconds = frameDuration;
 #ifdef _WIN32
             if (!m_gdiToken) continue;
             frame.bitmap = std::make_shared<Gdiplus::Bitmap>(filePath.c_str());
@@ -223,10 +232,141 @@ size_t Animation::LoadFromDirectory(const std::string& assetsDirectory) {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Per-clip timing + looping table.
+    // Each entry: { frameDurationSeconds, shouldLoop }
+    // Clips not listed fall back to { 0.14f, false }.
+    // -----------------------------------------------------------------------
+    struct ClipConfig { float frameDuration; bool looping; };
+    static const std::unordered_map<std::string, ClipConfig> kClipTimings = {
+        // ── Sleep cycle ────────────────────────────────────────────────────
+        // Sheet 1: slow, easing-in drift into slumber
+        { "falling-asleep",       { 0.28f, false } },
+        // Sheet 2: single languid yawn — plays once, then sleep loop takes over
+        { "sleepy-yawning",       { 0.22f, false } },
+        // Reverse of falling-asleep: gentle stretch before resuming idle
+        { "waking-up",            { 0.22f, false } },
+        { "morning-stretch",      { 0.22f, false } },
+        { "evening-wind-down",    { 0.24f, false } },
+
+        // ── Study / focus ──────────────────────────────────────────────────
+        // Sheet 3: calm page-turn rhythm — loops for the whole study session
+        { "reading",              { 0.20f, true  } },
+        { "studying",             { 0.20f, true  } },
+        { "digital-drawing",      { 0.18f, true  } },
+
+        // ── Conversation ───────────────────────────────────────────────────
+        // Sheet 4 (left half → thinking/pointing): attentive listener pace
+        { "listening",            { 0.18f, false } },
+        // Sheet 4 (right half → smiling): speech-paced, slightly quicker
+        { "talking",              { 0.16f, false } },
+
+        // ── Positive reactions ─────────────────────────────────────────────
+        // Sheet 5: upbeat celebratory pop
+        { "celebrating",          { 0.13f, false } },
+        { "goal-completed",       { 0.13f, false } },
+        { "happy-reunion",        { 0.13f, false } },
+
+        // ── Affection / warmth ─────────────────────────────────────────────
+        { "shy-affection",        { 0.17f, false } },
+        { "comforting",           { 0.17f, false } },
+        { "matcha-drinking",      { 0.19f, false } },
+        { "apology-repair",       { 0.17f, false } },
+
+        // ── Negative / boundary states ─────────────────────────────────────
+        { "asking-for-space",     { 0.19f, false } },
+        { "pouting",              { 0.21f, false } },
+        { "creative-frustration", { 0.19f, false } },
+        { "tired-encouragement",  { 0.22f, false } },
+
+        // ── Playful ────────────────────────────────────────────────────────
+        { "playful-teasing",      { 0.14f, false } },
+    };
+
+    // Discover optional personality/action clips without requiring enum changes.
+    for (const auto& entry : fs::directory_iterator(assetsDirectory, ec)) {
+        if (!entry.is_directory(ec)) {
+            continue;
+        }
+        const std::string name = entry.path().filename().string();
+        if (name == "idle" || name == "walk" || name == "run" ||
+            name == "sleep" || name == "reactions") {
+            continue;
+        }
+
+        // Resolve timing config — fall back gracefully for unknown clip names.
+        float frameDuration = 0.14f;
+        bool shouldLoop = false;
+        auto timingIt = kClipTimings.find(name);
+        if (timingIt != kClipTimings.end()) {
+            frameDuration = timingIt->second.frameDuration;
+            shouldLoop    = timingIt->second.looping;
+        }
+
+        AnimationClip clip(name, shouldLoop, frameDuration);
+        std::vector<fs::path> files;
+        for (const auto& image : fs::directory_iterator(entry.path(), ec)) {
+            std::string ext = image.path().extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            if (image.is_regular_file(ec) &&
+                (ext == ".png" || ext == ".bmp" || ext == ".jpg" || ext == ".jpeg")) {
+                files.push_back(image.path());
+            }
+        }
+        std::sort(files.begin(), files.end());
+        for (const auto& path : files) {
+            AnimationFrame frame;
+            frame.filePath = path.string();
+            frame.durationSeconds = frameDuration;
+#ifdef _WIN32
+            if (!m_gdiToken) {
+                continue;
+            }
+            frame.bitmap = std::make_shared<Gdiplus::Bitmap>(path.c_str());
+            if (frame.bitmap->GetLastStatus() != Gdiplus::Ok) {
+                continue;
+            }
+            frame.width  = static_cast<int32_t>(frame.bitmap->GetWidth());
+            frame.height = static_cast<int32_t>(frame.bitmap->GetHeight());
+#endif
+            clip.AddFrame(frame);
+        }
+        if (!clip.IsEmpty()) {
+            RegisterClip(name, std::move(clip));
+            loadedCount++;
+        }
+    }
+
     return loadedCount;
 }
 
 #ifdef _WIN32
+bool Animation::RenderAlpha(BYTE* pixels, int32_t width, int32_t height) const {
+    const auto* frame = GetCurrentFrame();
+    if (!pixels || width <= 0 || height <= 0 || !frame || !frame->bitmap) return false;
+    Gdiplus::Bitmap surface(width, height, width * 4, PixelFormat32bppPARGB, pixels);
+    Gdiplus::Graphics graphics(&surface);
+    graphics.Clear(Gdiplus::Color(0, 0, 0, 0));
+    graphics.SetCompositingMode(Gdiplus::CompositingModeSourceCopy);
+    graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+    graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
+    if (m_facingLeft) {
+        graphics.TranslateTransform(static_cast<float>(width), 0);
+        graphics.ScaleTransform(-1.0f, 1.0f);
+    }
+    Gdiplus::ImageAttributes attributes;
+    attributes.SetWrapMode(Gdiplus::WrapModeTileFlipXY);
+    // Always draw at the configured render dimensions (m_renderWidth x m_renderHeight).
+    // Using frame->width/height as the draw size caused sleep frames with larger native
+    // PNG dimensions to appear visually bigger than idle/walk frames.
+    int32_t drawW = (m_renderWidth  > 0) ? m_renderWidth  : width;
+    int32_t drawH = (m_renderHeight > 0) ? m_renderHeight : height;
+    return graphics.DrawImage(frame->bitmap.get(), Gdiplus::Rect(0, 0, drawW, drawH),
+        0, 0, frame->width, frame->height, Gdiplus::UnitPixel, &attributes) == Gdiplus::Ok;
+}
+
 bool Animation::Render(HDC hdc, int32_t destX, int32_t destY, int32_t destWidth, int32_t destHeight) {
     if (!hdc) return false;
 

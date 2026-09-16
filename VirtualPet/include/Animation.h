@@ -121,6 +121,10 @@ public:
     [[nodiscard]] bool IsFacingLeft() const noexcept { return m_facingLeft; }
     void SetFacingLeft(bool facingLeft) noexcept { m_facingLeft = facingLeft; }
 
+    /// Sets the fixed render dimensions so all frames draw at the same size.
+    /// Must be called after the physics window size is configured.
+    void SetRenderSize(int32_t width, int32_t height) noexcept { m_renderWidth = width; m_renderHeight = height; }
+
     [[nodiscard]] float GetPlaybackSpeed() const noexcept { return m_playbackSpeed; }
     void SetPlaybackSpeed(float speed) noexcept { m_playbackSpeed = (speed > 0.0f) ? speed : 1.0f; }
 
@@ -131,6 +135,8 @@ public:
     /// Renders current animation frame to the specified Windows device context.
     /// Supports alpha blending and horizontal flipping based on facing direction.
     bool Render(HDC hdc, int32_t destX, int32_t destY, int32_t destWidth, int32_t destHeight);
+    /// Draw into a top-down premultiplied BGRA surface for UpdateLayeredWindow.
+    bool RenderAlpha(BYTE* pixels, int32_t width, int32_t height) const;
 #endif
 
 private:
@@ -146,6 +152,8 @@ private:
     float m_playbackSpeed{1.0f};
     bool m_facingLeft{false};
     bool m_isFinished{false};
+    int32_t m_renderWidth{0};   ///< Fixed draw width (pixels); 0 = fall back to buffer width.
+    int32_t m_renderHeight{0};  ///< Fixed draw height (pixels); 0 = fall back to buffer height.
 
     AnimationCompleteCallback m_onComplete;
 };
