@@ -7,6 +7,8 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#else
+#include <gdk/gdk.h>
 #endif
 
 namespace VirtualPet {
@@ -108,8 +110,40 @@ void DesktopWorld::Refresh() {
     DetectTaskbar();
     RefreshWindowSurfaces();
 #else
-    m_primaryWorkArea = Rect(0, 0, 1920, 1040);
-    m_virtualScreenBounds = Rect(0, 0, 1920, 1080);
+    GdkDisplay* display = gdk_display_get_default();
+    if (display) {
+        int nMonitors = gdk_display_get_n_monitors(display);
+        for (int i = 0; i < nMonitors; ++i) {
+            GdkMonitor* mon = gdk_display_get_monitor(display, i);
+            if (!mon) continue;
+            GdkRectangle full{}, work{};
+            gdk_monitor_get_geometry(mon, &full);
+            gdk_monitor_get_workarea(mon, &work);
+            MonitorInfo info;
+            info.fullArea = Rect(full.x, full.y, full.width, full.height);
+            info.workArea = Rect(work.x, work.y, work.width, work.height);
+            info.isPrimary = gdk_monitor_is_primary(mon);
+            const char* model = gdk_monitor_get_model(mon);
+            info.deviceName = model ? model : ("Monitor " + std::to_string(i));
+            m_monitors.push_back(info);
+            if (info.isPrimary || i == 0) {
+                m_primaryWorkArea = info.workArea;
+                m_virtualScreenBounds = info.fullArea;
+            }
+        }
+    }
+    if (m_monitors.empty()) {
+        m_primaryWorkArea = Rect(0, 0, 1920, 1040);
+        m_virtualScreenBounds = Rect(0, 0, 1920, 1080);
+        MonitorInfo def;
+        def.fullArea = m_virtualScreenBounds;
+        def.workArea = m_primaryWorkArea;
+        def.isPrimary = true;
+        def.deviceName = "Default";
+        m_monitors.push_back(def);
+    }
+    DetectTaskbar();
+    RefreshWindowSurfaces();
 #endif
 }
 
@@ -120,6 +154,8 @@ void DesktopWorld::RefreshWindowSurfaces(void* ignoreHwnd) {
     params.surfaces = &m_windowSurfaces;
     params.ignoreHwnd = static_cast<HWND>(ignoreHwnd);
     ::EnumWindows(WindowEnumProc, reinterpret_cast<LPARAM>(&params));
+#else
+    (void)ignoreHwnd;
 #endif
 }
 
@@ -146,6 +182,16 @@ void DesktopWorld::DetectTaskbar() {
             }
             return;
         }
+    }
+#else
+    if (m_virtualScreenBounds.height > m_primaryWorkArea.height) {
+        m_taskbar.isVisible = true;
+        m_taskbar.edge = TaskbarEdge::Bottom;
+        m_taskbar.rect = Rect(m_primaryWorkArea.x,
+                              m_primaryWorkArea.y + m_primaryWorkArea.height,
+                              m_primaryWorkArea.width,
+                              m_virtualScreenBounds.height - m_primaryWorkArea.height);
+        return;
     }
 #endif
     m_taskbar.isVisible = false;

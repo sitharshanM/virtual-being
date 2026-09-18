@@ -33,6 +33,8 @@ public:
     /// Renders the current frame onto the window device context.
 #ifdef _WIN32
     void Render(HDC hdc);
+#else
+    void RenderCairo(struct _cairo* cr);
 #endif
     void RefreshDesktop() { m_desktopWorld.Refresh(); }
     void CancelInteraction() { m_mouseSensor.CancelInteraction(); if (m_physics.IsDragged()) m_physics.StopDragging(); }

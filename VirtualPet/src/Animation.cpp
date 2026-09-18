@@ -163,6 +163,7 @@ const AnimationFrame* Animation::GetCurrentFrame() const noexcept {
     return nullptr;
 }
 
+#ifdef _WIN32
 size_t Animation::LoadFromDirectory(const std::string& assetsDirectory) {
     namespace fs = std::filesystem;
     size_t loadedCount = 0;
@@ -310,7 +311,6 @@ size_t Animation::LoadFromDirectory(const std::string& assetsDirectory) {
     return loadedCount;
 }
 
-#ifdef _WIN32
 size_t Animation::LoadFromSpriteSheet(const std::string& sheetPath,
                                       int32_t cols, int32_t rows,
                                       const std::vector<SpriteSheetClipDef>& clips) {

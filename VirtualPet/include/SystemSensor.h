@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace VirtualPet {
 
@@ -30,6 +32,13 @@ struct SystemState {
     TimeOfDay timeOfDay{TimeOfDay::Afternoon};
     int32_t currentHour{12};
     int32_t currentMinute{0};
+
+    std::string activeWindowTitle;
+    std::string applicationKind;
+    float activityIntensity{0.0f};
+    float stressEstimate{0.0f};
+    bool isWeekend{false};
+    std::string clipboardText;
 };
 
 /**
@@ -54,10 +63,24 @@ public:
     [[nodiscard]] float GetIdleThreshold() const noexcept { return m_idleThresholdSeconds; }
     void SetIdleThreshold(float seconds) noexcept { m_idleThresholdSeconds = seconds; }
 
+    void SetContextCapture(bool useWindowTitle, bool useClipboard) noexcept {
+        m_useWindowTitle = useWindowTitle;
+        m_useClipboard = useClipboard;
+    }
+    void SetPrivacyFilter(bool blockSensitive, const std::vector<std::string>& excludedTerms) {
+        m_blockSensitive = blockSensitive;
+        m_excludedTerms = excludedTerms;
+    }
+
 private:
     float m_idleThresholdSeconds{120.0f};
     SystemState m_state;
     float m_pollTimer{0.0f};
+
+    bool m_useWindowTitle{false};
+    bool m_useClipboard{false};
+    bool m_blockSensitive{true};
+    std::vector<std::string> m_excludedTerms;
 
     void PollSystemState();
 };

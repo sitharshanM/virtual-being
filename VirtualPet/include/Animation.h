@@ -14,6 +14,9 @@
 #include <windows.h>
 #include <objidl.h>
 #include <gdiplus.h>
+#else
+#include <gdk-pixbuf/gdk-pixbuf.h>
+#include <cairo.h>
 #endif
 
 namespace VirtualPet {
@@ -41,6 +44,8 @@ struct AnimationFrame {
     int32_t height{0};                  ///< Pixel height of frame.
 #ifdef _WIN32
     std::shared_ptr<Gdiplus::Bitmap> bitmap; ///< Shared ownership of decoded image data.
+#else
+    std::shared_ptr<GdkPixbuf> pixbuf;       ///< Shared ownership of decoded image data.
 #endif
 };
 
@@ -159,6 +164,9 @@ public:
     bool Render(HDC hdc, int32_t destX, int32_t destY, int32_t destWidth, int32_t destHeight);
     /// Draw into a top-down premultiplied BGRA surface for UpdateLayeredWindow.
     bool RenderAlpha(BYTE* pixels, int32_t width, int32_t height) const;
+#else
+    /// Renders current animation frame to a Cairo context.
+    bool RenderCairo(cairo_t* cr, int32_t destX, int32_t destY, int32_t destWidth, int32_t destHeight) const;
 #endif
 
 private:
