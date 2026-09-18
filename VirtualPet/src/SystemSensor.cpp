@@ -1,5 +1,9 @@
 #include "SystemSensor.h"
 
+#include <ctime>
+#include <fstream>
+#include <string>
+
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -78,9 +82,54 @@ void SystemSensor::PollSystemState() {
         m_state.timeOfDay = TimeOfDay::Night;
     }
 #else
-    m_state.timeOfDay = TimeOfDay::Afternoon;
+    // 1. System Time / Day-Night Cycle
+    std::time_t now = std::time(nullptr);
+    std::tm local{};
+    localtime_r(&now, &local);
+    m_state.currentHour = local.tm_hour;
+    m_state.currentMinute = local.tm_min;
+
+    if (local.tm_hour >= 6 && local.tm_hour < 12) {
+        m_state.timeOfDay = TimeOfDay::Morning;
+    } else if (local.tm_hour >= 12 && local.tm_hour < 18) {
+        m_state.timeOfDay = TimeOfDay::Afternoon;
+    } else if (local.tm_hour >= 18 && local.tm_hour < 22) {
+        m_state.timeOfDay = TimeOfDay::Evening;
+    } else {
+        m_state.timeOfDay = TimeOfDay::Night;
+    }
+
+    // 2. Battery & Power Status
     m_state.powerState = PowerState::ACPower;
-    m_state.isUserIdle = false;
+    m_state.batteryPercent = -1.0f;
+    m_state.isBatterySaverOn = false;
+
+    // Check Linux sysfs power supply
+    std::ifstream statusFile("/sys/class/power_supply/BAT0/status");
+    if (!statusFile.is_open()) statusFile.open("/sys/class/power_supply/BAT1/status");
+    if (statusFile.is_open()) {
+        std::string status;
+        statusFile >> status;
+        statusFile.close();
+
+        std::ifstream capFile("/sys/class/power_supply/BAT0/capacity");
+        if (!capFile.is_open()) capFile.open("/sys/class/power_supply/BAT1/capacity");
+        if (capFile.is_open()) {
+            int cap = 100;
+            if (capFile >> cap) {
+                m_state.batteryPercent = static_cast<float>(cap);
+                if (status == "Discharging") {
+                    m_state.powerState = (cap <= 20) ? PowerState::BatteryLow : PowerState::BatteryNormal;
+                } else {
+                    m_state.powerState = PowerState::ACPower;
+                }
+            }
+            capFile.close();
+        }
+    }
+
+    // 3. User idle state
+    m_state.isUserIdle = (m_state.userIdleTimeSeconds >= m_idleThresholdSeconds);
 #endif
 }
 

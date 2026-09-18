@@ -3,6 +3,7 @@
 #include "Memory.h"
 
 #include <string>
+#include <vector>
 
 namespace VirtualPet {
 
@@ -37,6 +38,15 @@ struct AppConfigData {
     std::string assetsDir{"assets"};
     std::string dataDir{"data"};
     std::string saveFile{"data/pet_state.json"};
+
+    bool localLlmEnabled{false};
+    std::string localLlmEndpoint{"http://127.0.0.1:11434"};
+    std::string localLlmModel{"llama3.2"};
+    float localLlmIntervalSeconds{30.0f};
+    bool localLlmUseWindowTitle{false};
+    bool localLlmUseClipboard{false};
+    bool localLlmBlockSensitiveWindows{true};
+    std::vector<std::string> localLlmExcludedWindowTerms{};
 };
 
 /**

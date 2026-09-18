@@ -25,7 +25,7 @@ PetStateData SaveManager::GetDefaultState() const noexcept {
     def.name = "Astra";
     def.needs = {0.8f, 0.2f, 0.8f, 0.5f};
     def.personality = {0.7f, 0.7f, 0.3f};
-    def.history = {0, 0, 0, "bottom-right"};
+    def.history = InteractionHistory{};
     return def;
 }
 
@@ -64,6 +64,9 @@ std::string SaveManager::SerializeToJson(const PetStateData& d) const {
         {"energy", d.needs.energy}, {"mood", d.needs.mood},
         {"hunger", d.needs.hunger}, {"trust", d.needs.trust},
         {"personality", {{"curiosity", d.personality.curiosity}, {"playfulness", d.personality.playfulness}, {"laziness", d.personality.laziness}}},
+        {"identity", {{"personal_goal", d.identity.personalGoal}, {"goal_progress", d.identity.goalProgress},
+            {"favorite_drink", d.identity.favoriteDrink}, {"favorite_music", d.identity.favoriteMusic},
+            {"favorite_activity", d.identity.favoriteActivity}, {"dislike", d.identity.dislike}, {"imperfection", d.identity.imperfection}}},
         {"memory", {{"times_played", d.history.timesPlayed}, {"times_fed", d.history.timesFed},
             {"times_petted", d.history.timesPetted}, {"favorite_screen_area", d.history.favoriteScreenArea}}}}.dump(2);
 }
@@ -81,7 +84,20 @@ bool SaveManager::DeserializeFromJson(const std::string& text, PetStateData& out
         const auto& p = j.at("personality");
         d.personality = {p.at("curiosity").get<float>(), p.at("playfulness").get<float>(), p.at("laziness").get<float>()};
         const auto& h = j.at("memory");
-        d.history = {h.value("times_played", 0), h.value("times_fed", 0), h.value("times_petted", 0), h.value("favorite_screen_area", std::string("bottom-right"))};
+        d.history.timesPlayed = h.value("times_played", 0);
+        d.history.timesFed = h.value("times_fed", 0);
+        d.history.timesPetted = h.value("times_petted", 0);
+        d.history.favoriteScreenArea = h.value("favorite_screen_area", std::string("bottom-right"));
+        if (j.contains("identity") && j["identity"].is_object()) {
+            const auto& id = j["identity"];
+            d.identity.personalGoal = id.value("personal_goal", d.identity.personalGoal);
+            d.identity.goalProgress = id.value("goal_progress", d.identity.goalProgress);
+            d.identity.favoriteDrink = id.value("favorite_drink", d.identity.favoriteDrink);
+            d.identity.favoriteMusic = id.value("favorite_music", d.identity.favoriteMusic);
+            d.identity.favoriteActivity = id.value("favorite_activity", d.identity.favoriteActivity);
+            d.identity.dislike = id.value("dislike", d.identity.dislike);
+            d.identity.imperfection = id.value("imperfection", d.identity.imperfection);
+        }
         if (!Validate(d)) return false;
         outData = std::move(d);
         return true;
@@ -123,6 +139,14 @@ bool SaveManager::DeserializeConfigFromJson(const std::string& text, AppConfigDa
         c.assetsDir = paths.value("assets_dir", c.assetsDir);
         c.dataDir = paths.value("data_dir", c.dataDir);
         c.saveFile = paths.value("save_file", (std::filesystem::path(c.dataDir) / "pet_state.json").string());
+        const auto llm = j.value("llm", Json::object());
+        c.localLlmEnabled = llm.value("enabled", c.localLlmEnabled);
+        c.localLlmEndpoint = llm.value("endpoint", c.localLlmEndpoint);
+        c.localLlmModel = llm.value("model", c.localLlmModel);
+        c.localLlmIntervalSeconds = llm.value("interval_seconds", c.localLlmIntervalSeconds);
+        c.localLlmUseWindowTitle = llm.value("use_window_title", c.localLlmUseWindowTitle);
+        c.localLlmUseClipboard = llm.value("use_clipboard", c.localLlmUseClipboard);
+        c.localLlmBlockSensitiveWindows = llm.value("block_sensitive_windows", c.localLlmBlockSensitiveWindows);
         const auto range = [](float v, float lo, float hi) { return std::isfinite(v) && v >= lo && v <= hi; };
         if (c.version != 1 || c.title.empty() || c.targetFps < 1 || c.targetFps > 240 ||
             c.windowWidth < 1 || c.windowWidth > 2048 || c.windowHeight < 1 || c.windowHeight > 2048 ||

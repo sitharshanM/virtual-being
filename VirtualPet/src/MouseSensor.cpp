@@ -7,6 +7,8 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#else
+#include <gdk/gdk.h>
 #endif
 
 namespace VirtualPet {
@@ -25,6 +27,36 @@ void MouseSensor::PollOSCursor() {
     }
     m_state.leftButtonDown = (::GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
     m_state.rightButtonDown = (::GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
+#else
+    const char* wayland = std::getenv("WAYLAND_DISPLAY");
+    if (wayland && *wayland) {
+        // Under Wayland, global cursor polling without an active pointer grab is prohibited.
+        // Pointer position and click/drag states are driven via GDK window events
+        // (OnButtonDown, OnMouseMove, OnButtonUp).
+        return;
+    }
+    GdkDisplay* disp = gdk_display_get_default();
+    if (disp) {
+        GdkSeat* seat = gdk_display_get_default_seat(disp);
+        if (seat) {
+            GdkDevice* dev = gdk_seat_get_pointer(seat);
+            if (dev) {
+                gint x = 0, y = 0;
+                GdkModifierType mask = static_cast<GdkModifierType>(0);
+                GdkScreen* screen = gdk_display_get_default_screen(disp);
+                if (screen) {
+                    GdkWindow* root = gdk_screen_get_root_window(screen);
+                    if (root) {
+                        gdk_device_get_state(dev, root, nullptr, &mask);
+                    }
+                }
+                gdk_device_get_position(dev, nullptr, &x, &y);
+                m_state.screenPosition = Point(x, y);
+                m_state.leftButtonDown = (mask & GDK_BUTTON1_MASK) != 0;
+                m_state.rightButtonDown = (mask & GDK_BUTTON3_MASK) != 0;
+            }
+        }
+    }
 #endif
 }
 

@@ -20,6 +20,10 @@ bool Pet::Init(const std::string& configPath, const std::string& statePath) {
     wchar_t exe[32768]{};
     DWORD length = GetModuleFileNameW(nullptr, exe, 32768);
     if (length && length < 32768) base = fs::path(exe).parent_path();
+#else
+    std::error_code ec;
+    fs::path exe = fs::read_symlink("/proc/self/exe", ec);
+    if (!ec && !exe.empty()) base = exe.parent_path();
 #endif
     const fs::path configFile = configPath.empty() ? base / "config/pet_config.json" : fs::absolute(configPath);
     m_saveManager.LoadConfig(configFile.string(), m_config);
@@ -30,6 +34,16 @@ bool Pet::Init(const std::string& configPath, const std::string& statePath) {
     wchar_t localData[32768]{};
     DWORD dataLength = GetEnvironmentVariableW(L"LOCALAPPDATA", localData, 32768);
     if (dataLength && dataLength < 32768) dataRoot = fs::path(localData) / "VirtualPet";
+#else
+    const char* xdgData = std::getenv("XDG_DATA_HOME");
+    if (xdgData && *xdgData) {
+        dataRoot = fs::path(xdgData) / "VirtualPet";
+    } else {
+        const char* home = std::getenv("HOME");
+        if (home && *home) {
+            dataRoot = fs::path(home) / ".local/share/VirtualPet";
+        }
+    }
 #endif
     m_saveManager.SetFilePath(statePath.empty() ? (dataRoot / m_config.saveFile).string() : statePath);
     m_life.SetPath((fs::path(m_saveManager.GetFilePath()).parent_path() / "companion_life.json").string());
@@ -157,7 +171,12 @@ void Pet::UpdateStep(float deltaTime) {
                                             m_desktopWorld,
                                             m_physics);
     const auto& system = m_systemSensor.GetState();
-    std::time_t now = std::time(nullptr); std::tm local{}; localtime_s(&local,&now);
+    std::time_t now = std::time(nullptr); std::tm local{};
+#ifdef _WIN32
+    localtime_s(&local, &now);
+#else
+    localtime_r(&now, &local);
+#endif
     char day[16]{}; std::strftime(day,sizeof(day),"%Y-%m-%d",&local);
     if(m_life.BeginDay(day)) {
         m_memory.GetData().needs.mood = std::min(1.0f,m_memory.GetNeeds().mood+0.05f);
@@ -252,6 +271,10 @@ void Pet::UpdateStep(float deltaTime) {
 #ifdef _WIN32
 void Pet::Render(HDC hdc) {
     m_animation.Render(hdc, 0, 0, m_physics.GetWidth(), m_physics.GetHeight());
+}
+#else
+void Pet::RenderCairo(struct _cairo* cr) {
+    m_animation.RenderCairo(cr, 0, 0, m_physics.GetWidth(), m_physics.GetHeight());
 }
 #endif
 
