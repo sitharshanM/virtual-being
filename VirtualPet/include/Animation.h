@@ -27,6 +27,13 @@ enum class AnimationState {
     Walk,
     Run,
     Reaction,
+    Sit,
+    SitHang,
+    Fall,
+    Land,
+    ClimbUp,
+    Sleep,
+    LookAround,
     Custom
 };
 

@@ -15,13 +15,13 @@
   },
   "physics": {
     "gravity": 980.0,
-    "ground_margin": 10,
+    "ground_margin": 0,
     "edge_bounce": 0.2,
     "drag_smoothing": 0.15
   },
   "behavior": {
     "tick_rate_hz": 10,
-    "idle_timeout_seconds": 30,
+    "idle_timeout_seconds": 4,
     "energy_depletion_rate": 0.005,
     "hunger_increase_rate": 0.008
   },

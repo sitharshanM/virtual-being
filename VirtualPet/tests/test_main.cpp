@@ -4,6 +4,7 @@
 #include "../include/Physics.h"
 #include "../include/SaveManager.h"
 #include "../include/CompanionLife.h"
+#include "../include/DesktopWatcher.h"
 
 #include <cassert>
 #include <cmath>
@@ -264,9 +265,22 @@ void TestRegressions() {
 
         pet.StartStudyMode(60.0f);
         EXPECT(pet.GetBrain().IsInStudyMode(), "Study mode activates successfully");
+        pet.ToggleStudyMode();
+        EXPECT(!pet.GetBrain().IsInStudyMode(), "ToggleStudyMode deactivates study mode successfully");
+        pet.StartStudyMode(60.0f);
 
         pet.TossPlushieHeart();
         EXPECT(pet.GetPhysics().GetToy().active && !pet.GetPhysics().GetToy().isTreat, "Plushie heart spawned in physics world");
+
+        // Test right-click context menu freezing
+        pet.OnRButtonDown(Point(20, 20));
+        EXPECT(pet.IsMenuOpen(), "Right click opens menu state on Pet");
+        pet.Update(0.016f);
+        EXPECT(pet.GetPhysics().GetVelocityX() == 0.0f, "Pet velocity is zeroed while menu is open");
+        EXPECT(pet.GetBrain().IsMenuOpen(), "Pet brain registers menu open");
+
+        pet.SetMenuOpen(false);
+        EXPECT(!pet.IsMenuOpen(), "Dismissing menu clears open state on Pet");
     }
     fs::remove("pet_integration_config.json");
     fs::remove("pet_integration_state.json");
@@ -384,6 +398,340 @@ void TestRegressions() {
 #endif
 }
 
+void TestDesktopInteraction() {
+    std::cout << "Running TestDesktopInteraction (Milestone 1)...\n";
+
+    // 1. Test Animation States and Graceful Fallbacks
+    Animation anim;
+    anim.Play(AnimationState::ClimbUp);
+    EXPECT(anim.GetCurrentState() == AnimationState::ClimbUp, "ClimbUp animation state activates");
+    EXPECT(anim.GetCurrentClipName() == "walk", "ClimbUp gracefully fakes walk clip when dedicated sprite is absent");
+
+    anim.Play(AnimationState::SitHang);
+    EXPECT(anim.GetCurrentState() == AnimationState::SitHang, "SitHang animation state activates");
+    EXPECT(anim.GetCurrentClipName() == "idle" || anim.GetCurrentClipName() == "sitting-idle", "SitHang gracefully fakes idle clip");
+
+    anim.Play(AnimationState::Fall);
+    EXPECT(anim.GetCurrentState() == AnimationState::Fall, "Fall animation state activates");
+
+    anim.Play(AnimationState::Land);
+    EXPECT(anim.GetCurrentState() == AnimationState::Land, "Land animation state activates");
+
+    // 2. Test DesktopWatcher Surface Tracking & Nearest Surface
+    WindowSurface ws1;
+    ws1.bounds = Rect(200, 400, 600, 300);
+    ws1.title = "Visual Studio Code - main.cpp";
+#ifdef _WIN32
+    ws1.hwnd = (HWND)0x1234;
+#else
+    ws1.xwin = 0x1234;
+#endif
+
+    WindowSurface ws2;
+    ws2.bounds = Rect(900, 500, 500, 400);
+    ws2.title = "Alacritty - bash terminal";
+#ifdef _WIN32
+    ws2.hwnd = (HWND)0x5678;
+#else
+    ws2.xwin = 0x5678;
+#endif
+
+    DesktopWorld testWorld(Rect(0, 0, 1920, 1080), {ws1, ws2});
+    DesktopWatcher watcher;
+    watcher.SetRefreshInterval(0.1f);
+
+    // Nearest surface selection
+    const WindowSurface* nearest = watcher.GetNearestSurface(Point(250, 600), testWorld);
+    EXPECT(nearest != nullptr && nearest->title == ws1.title, "Nearest surface found correctly");
+
+    const WindowSurface* nearest2 = watcher.GetNearestSurface(Point(1000, 600), testWorld);
+    EXPECT(nearest2 != nullptr && nearest2->title == ws2.title, "Nearest surface switches based on proximity");
+
+    // 3. Test Pet Standing on Window Top
+    Rect petOnWindow(250, 300, 100, 100);
+    watcher.Update(0.016f, petOnWindow, testWorld);
+    EXPECT(watcher.GetCurrentSurface() != nullptr && watcher.GetCurrentSurface()->title == ws1.title,
+           "Pet correctly detected as resting on window top surface");
+
+    // 4. Test Window Movement Diff
+    WindowSurface ws1Moved = ws1;
+    ws1Moved.bounds = Rect(250, 420, 600, 300);
+    DesktopWorld movedWorld(Rect(0, 0, 1920, 1080), {ws1Moved, ws2});
+    watcher.Update(0.15f, petOnWindow, movedWorld);
+    EXPECT(watcher.SurfaceJustMoved(), "Surface movement detected by watcher");
+    EXPECT(watcher.GetSurfaceMoveDelta().x == 50 && watcher.GetSurfaceMoveDelta().y == 20,
+           "Watcher calculated exact surface translation delta");
+
+    // 5. Test Window Disappearance (Surface Gone)
+    DesktopWorld closedWorld(Rect(0, 0, 1920, 1080), {ws2});
+    watcher.Update(0.15f, petOnWindow, closedWorld);
+    EXPECT(watcher.SurfaceJustGone(), "Watcher detected closed/vanished window surface");
+
+    // 6. Test PetBrain Reactions to Window Dynamics
+    MouseSensor mouse;
+    SystemSensor system;
+    Physics physics;
+    physics.SetDimensions(100, 100);
+    physics.SetPosition(250.0f, 300.0f);
+    Memory memory;
+    PetBrain brain;
+
+    BrainDecision fallDecision = brain.Update(0.016f, mouse, system, memory, closedWorld, physics, &watcher);
+    EXPECT(fallDecision.action == PetAction::Falling, "Pet enters Falling action when window vanishes");
+    EXPECT(fallDecision.animState == AnimationState::Fall, "Pet plays Fall animation");
+    watcher.ResetFrameFlags();
+
+    // Pet landing on ground after fall
+    physics.SetPosition(250.0f, static_cast<float>(closedWorld.GetGroundY(250, 100, 0)));
+    physics.SetVelocity(0.0f, 0.0f);
+    physics.Update(0.016f, closedWorld);
+    BrainDecision landDecision = brain.Update(0.016f, mouse, system, memory, closedWorld, physics, &watcher);
+    EXPECT(landDecision.action == PetAction::Idle, "Pet returns to Idle upon landing");
+    EXPECT(landDecision.animState == AnimationState::Land, "Pet plays Land animation upon touchdown");
+
+    // 7. Test Keyword Matching on Window Sit
+    DesktopWatcher climbWatcher;
+    climbWatcher.SetRefreshInterval(0.1f);
+    DesktopWorld codeWorld(Rect(0, 0, 1920, 1080), {ws1});
+    climbWatcher.Update(0.15f, Rect(200, 700, 100, 100), codeWorld);
+
+    brain.RequestAction(PetAction::ClimbingWindow, 0.8f);
+    BrainDecision climbStep = brain.Update(0.016f, mouse, system, memory, codeWorld, physics, &climbWatcher);
+    EXPECT(climbStep.action == PetAction::ClimbingWindow && climbStep.animState == AnimationState::ClimbUp,
+           "Pet climbs window with ClimbUp animation");
+
+    BrainDecision sitDecision = brain.Update(0.85f, mouse, system, memory, codeWorld, physics, &climbWatcher);
+    EXPECT(sitDecision.action == PetAction::SittingOnWindow, "Pet sits on window after climb completion");
+    EXPECT(sitDecision.animState == AnimationState::SitHang, "Pet sits with SitHang animation state");
+
+    // 8. Test Headroom Clearance Edge Case (Maximized / Ceiling-Docked Windows)
+    WindowSurface topDockedWindow;
+    topDockedWindow.bounds = Rect(0, 47, 1920, 1033); // e.g. Hyprland single window tiled below Waybar
+    topDockedWindow.title = "virtual-being - Antigravity IDE";
+    topDockedWindow.appClass = "antigravity-ide";
+
+    DesktopWorld singleMaximizedWorld(Rect(0, 0, 1920, 1080), {topDockedWindow});
+    DesktopWatcher headroomWatcher;
+
+    // Nearest surface must reject top-docked window because bounds.y (47) - petHeight (120) = -73 < 0 + 10
+    const WindowSurface* noSurface = headroomWatcher.GetNearestSurface(Point(500, 500), singleMaximizedWorld, 120);
+    EXPECT(noSurface == nullptr, "Watcher rejects top-docked window with insufficient ceiling headroom");
+    EXPECT(!headroomWatcher.HasClimbableSurfaces(singleMaximizedWorld, 120), "HasClimbableSurfaces returns false for zero headroom");
+
+    // Supporting surface check ignores surface that forces pet off-screen, falling back to desktop floor
+    int32_t groundY = singleMaximizedWorld.GetGroundY(500, 120, 0);
+    EXPECT(singleMaximizedWorld.GetSupportingSurfaceY(500, 47, 100, 120, 0) == groundY,
+           "DesktopWorld rejects supporting surface that pushes pet off top screen edge and uses floor");
+
+    // Utility scores must not attempt climb (windowScore == 0) on single maximized screen
+    UtilityScores scores = brain.CalculateUtilityScores(memory, mouse, system, physics, &headroomWatcher, &singleMaximizedWorld);
+    EXPECT(scores.windowScore == 0.0f, "Pet utility engine gives 0 windowScore when no climbable windows exist");
+    EXPECT(scores.wanderScore > scores.idleScore, "Floor wanderScore exceeds idleScore so companion does not freeze indefinitely on single maximized screen");
+
+    // 9. Test Dynamic Contextual Thought Generation & Active App Awareness
+    std::string kittyThought1 = brain.GenerateAppThought("~", "kitty", false);
+    EXPECT(!kittyThought1.empty(), "Kitty terminal with '~' title generates valid thought");
+    EXPECT(kittyThought1.find("Terminal") != std::string::npos || kittyThought1.find("terminal") != std::string::npos ||
+           kittyThought1.find("CLI") != std::string::npos || kittyThought1.find("command") != std::string::npos,
+           "Terminal class triggers terminal-specific reaction");
+
+    std::string kittyThought2 = brain.GenerateAppThought("~", "kitty", false);
+    EXPECT(kittyThought1 != kittyThought2, "Successive thoughts rotate rather than repeating static text");
+
+    std::string winTermThought = brain.GenerateAppThought("Windows PowerShell", "CASCADIA_HOSTING_WINDOW_CLASS", false);
+    EXPECT(winTermThought.find("Terminal") != std::string::npos || winTermThought.find("terminal") != std::string::npos ||
+           winTermThought.find("CLI") != std::string::npos || winTermThought.find("Command") != std::string::npos ||
+           winTermThought.find("command") != std::string::npos || winTermThought.find("Compiling") != std::string::npos ||
+           winTermThought.find("shell") != std::string::npos,
+           "Windows Terminal class triggers terminal reaction dynamically");
+
+    std::string cmdThought = brain.GenerateAppThought("Command Prompt - ping 127.0.0.1", "ConsoleWindowClass", false);
+    EXPECT(cmdThought.find("Terminal") != std::string::npos || cmdThought.find("terminal") != std::string::npos ||
+           cmdThought.find("CLI") != std::string::npos || cmdThought.find("command") != std::string::npos ||
+           cmdThought.find("Compiling") != std::string::npos || cmdThought.find("shell") != std::string::npos,
+           "Windows ConsoleWindowClass cmd triggers terminal reaction dynamically");
+
+    std::string codeThought1 = brain.GenerateAppThought("virtual-being - Antigravity IDE", "antigravity-ide", false);
+    EXPECT(!codeThought1.empty(), "Antigravity IDE generates valid thought");
+    EXPECT(codeThought1.find("code") != std::string::npos || codeThought1.find("Coding") != std::string::npos ||
+           codeThought1.find("keyboard") != std::string::npos || codeThought1.find("rubber duck") != std::string::npos ||
+           codeThought1.find("bugs") != std::string::npos || codeThought1.find("flow state") != std::string::npos ||
+           codeThought1.find("functions") != std::string::npos || codeThought1.find("commit") != std::string::npos ||
+           codeThought1.find("logic") != std::string::npos,
+           "IDE triggers coding-specific reaction");
+
+    std::string chatThought = brain.GenerateAppThought("general", "discord", false);
+    EXPECT(chatThought.find("Chat") != std::string::npos || chatThought.find("messages") != std::string::npos ||
+           chatThought.find("conversation") != std::string::npos,
+           "Discord app class triggers chat-specific reaction");
+
+    // 10. Test Active Window Context Reflection in Brain Update
+    WindowSurface activeWs;
+    activeWs.bounds = Rect(0, 47, 1920, 1033);
+    activeWs.title = "test_main.cpp - Antigravity IDE";
+    activeWs.appClass = "antigravity-ide";
+    singleMaximizedWorld.SetActiveWindow(activeWs);
+
+    BrainDecision activeDecision = brain.Update(0.016f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+    EXPECT(!activeDecision.thought.empty(), "Brain produces non-empty thought reflecting active window");
+
+    // 11. Test Drag Release & Airborne Throwing Transitions
+    physics.StartDragging(Point(500, 300), Point(50, 50));
+    BrainDecision dragDecision = brain.Update(0.016f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+    EXPECT(dragDecision.action == PetAction::Dragged, "Pet enters Dragged state when mouse dragged");
+
+    // Release mouse while in mid-air (simulate throw/drop)
+    physics.StopDragging();
+    physics.SetPosition(500.0f, 300.0f); // mid-air, not grounded
+    physics.SetVelocity(300.0f, -150.0f);
+    BrainDecision throwDecision = brain.Update(0.016f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+    EXPECT(throwDecision.action == PetAction::Falling, "Pet immediately enters Falling state upon airborne throw release");
+    EXPECT(throwDecision.animState == AnimationState::Fall, "Pet plays Fall animation when thrown airborne");
+
+    // Land on ground
+    physics.SetPosition(500.0f, static_cast<float>(singleMaximizedWorld.GetGroundY(500, 100, 0)));
+    physics.SetVelocity(0.0f, 0.0f);
+    physics.Update(0.016f, singleMaximizedWorld);
+    BrainDecision landThrowDecision = brain.Update(0.016f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+    EXPECT(landThrowDecision.animState == AnimationState::Land, "Pet plays Land animation upon touchdown after throw");
+
+    // After brief landing recovery (0.55s), pet must naturally resume active behavior without being frozen
+    BrainDecision resumeDecision = brain.Update(0.55f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+    EXPECT(resumeDecision.action != PetAction::Dragged && resumeDecision.action != PetAction::Falling,
+           "Pet resumes autonomous activity without getting stuck in inactive/concussed freeze");
+
+    // 12. Test Right-Click Context Menu Stillness
+    brain.SetMenuOpen(true);
+    EXPECT(brain.IsMenuOpen() == true, "Brain records menu open state");
+    BrainDecision menuDecision = brain.Update(0.016f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+    EXPECT(menuDecision.targetHorizontalSpeed == 0.0f, "Pet stops horizontal movement while menu is open");
+    EXPECT(menuDecision.animState == AnimationState::Idle, "Pet assumes still Idle animation while menu is open");
+    EXPECT(!menuDecision.thought.empty(), "Pet displays attentive thought while menu is open");
+
+    // When menu is closed, brain resumes normal operations
+    brain.SetMenuOpen(false);
+    EXPECT(brain.IsMenuOpen() == false, "Brain records menu closed state");
+    BrainDecision postMenuDecision = brain.Update(0.016f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+    EXPECT(postMenuDecision.action != PetAction::Dragged, "Pet operates normally after menu closes");
+
+    // 13. Test Plushie Heart Play, Anti-Corner Toss, and Final Pocketing
+    int playGroundY = singleMaximizedWorld.GetGroundY(200, physics.GetHeight(), 0);
+    float petY = static_cast<float>(playGroundY);
+    float petX = 200.0f;
+    physics.SetPosition(petX, petY);
+    // Spawn toy right in contact range of the companion
+    float toyX = petX + physics.GetWidth() / 2.0f;
+    float toyY = petY + physics.GetHeight() / 2.0f;
+    physics.SpawnToy(toyX, toyY, 0.0f, 0.0f, false);
+    brain.RequestAction(PetAction::ChasingToy, 5.0f);
+    EXPECT(physics.GetToy().active, "Plushie heart starts active");
+    EXPECT(physics.GetToy().catchesRemaining == 2, "Plushie heart initializes with 2 catches");
+
+    // 1st catch: rally bounce
+    BrainDecision catch1 = brain.Update(0.016f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+    EXPECT(physics.GetToy().active, "Toy remains active after first rally");
+    EXPECT(physics.GetToy().catchesRemaining == 1, "First catch decrements catchesRemaining to 1");
+    EXPECT(physics.GetToy().vx != 0.0f, "Toy bounced back towards open screen space");
+
+    // Fast-forward contact cooldown while pet moves
+    physics.SetPosition(0.0f, 0.0f);
+    brain.Update(0.7f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+
+    // Position pet at toy for 2nd (final) catch
+    physics.SetPosition(physics.GetToy().x - physics.GetWidth() / 2.0f, physics.GetToy().y - physics.GetHeight() / 2.0f);
+    brain.RequestAction(PetAction::ChasingToy, 5.0f);
+    BrainDecision catch2 = brain.Update(0.016f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+    EXPECT(!physics.GetToy().active, "Companion hugs and pockets the plushie heart on final catch");
+    EXPECT(catch2.animState == AnimationState::Reaction, "Companion shows heart reaction when collecting plushie");
+
+    // Test Toy Lifetime Auto-Despawn Safety
+    physics.SpawnToy(500.0f, 500.0f, 0.0f, 0.0f, false);
+    EXPECT(physics.GetToy().active, "Toy spawned for timeout test");
+    physics.GetToy().lifetime = 20.5f;
+    physics.Update(0.016f, singleMaximizedWorld);
+    EXPECT(!physics.GetToy().active, "Toy automatically despawns after 20s lifetime to avoid clutter or stuck items");
+
+    // 14. Test Study Mode Toggle and Toy Interaction Break
+    brain.StartStudyMode(60.0f);
+    EXPECT(brain.IsInStudyMode(), "Study mode starts");
+    
+    // While in study mode, tossing a plushie heart allows taking a break to play
+    physics.SpawnToy(300.0f, static_cast<float>(singleMaximizedWorld.GetGroundY(300, physics.GetHeight(), 0)), 0.0f, 0.0f, false);
+    BrainDecision studyToyDecision = brain.Update(0.016f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+    EXPECT(studyToyDecision.action == PetAction::ChasingToy, "Companion takes a break to chase toy during study mode");
+
+    // Clear toy and verify study mode resumes
+    physics.ClearToy();
+    BrainDecision resumeStudyDecision = brain.Update(0.016f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+    EXPECT(resumeStudyDecision.action == PetAction::StudyMode, "Companion resumes study mode once toy is cleared");
+
+    // Test toggling study mode off
+    brain.ToggleStudyMode();
+    EXPECT(!brain.IsInStudyMode(), "ToggleStudyMode exits study mode immediately");
+    BrainDecision postStudyDecision = brain.Update(0.016f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+    EXPECT(postStudyDecision.action != PetAction::StudyMode, "Companion returns to normal behavior after exiting study mode");
+}
+
+void TestCursorFocusAndDaydreaming() {
+    std::cout << "Running TestCursorFocusAndDaydreaming...\n";
+    MouseSensor mouse;
+    Rect petBounds(100, 100, 120, 120);
+
+    // 1. Test MouseSensor OnMouseMove vs OnMouseLeave
+    mouse.OnMouseMove(Point(120, 120), petBounds);
+    EXPECT(mouse.IsHovering(), "Mouse hovering over pet bounds");
+    EXPECT(mouse.IsNear(), "Mouse is near pet");
+
+    mouse.OnMouseLeave();
+    EXPECT(!mouse.IsHovering(), "Mouse is not hovering after OnMouseLeave");
+    EXPECT(!mouse.IsNear(), "Mouse is not near after OnMouseLeave");
+    EXPECT(mouse.GetDistanceToPet() > 1000.0f, "Distance to pet is out of range after OnMouseLeave");
+
+    // 2. Test PetBrain FollowingCursor timeout into Daydreaming
+    PetBrain brain;
+    SystemSensor system;
+    Memory memory;
+    DesktopWorld world(Rect(0, 0, 1920, 1080), {});
+    Physics physics;
+    physics.SetPosition(500.0f, 960.0f);
+    physics.SetDimensions(120, 120);
+    DesktopWatcher watcher;
+
+    // Move mouse near companion to trigger cursor following
+    mouse.OnMouseMove(Point(520, 960), physics.GetBounds());
+    brain.RequestAction(PetAction::FollowingCursor, 1.0f);
+    BrainDecision followDecision = brain.Update(0.016f, mouse, system, memory, world, physics, &watcher);
+    EXPECT(followDecision.action == PetAction::FollowingCursor, "Companion starts in FollowingCursor action");
+
+    // Advance time past the 1.0s action timer
+    BrainDecision daydreamDecision = brain.Update(1.2f, mouse, system, memory, world, physics, &watcher);
+    EXPECT(daydreamDecision.action == PetAction::Daydreaming,
+           "Companion transitions to Daydreaming when FollowingCursor action expires");
+    EXPECT(daydreamDecision.animState == AnimationState::LookAround,
+           "Daydreaming companion observes surroundings with LookAround animation");
+    EXPECT(daydreamDecision.targetHorizontalSpeed == 0.0f,
+           "Daydreaming companion rests in place without freezing");
+    EXPECT(daydreamDecision.thought.find("focus") != std::string::npos ||
+           daydreamDecision.thought.find("daydream") != std::string::npos,
+           "Companion thought reflects being out of focus / daydreaming");
+
+    // Advance time past Daydreaming duration (e.g. 5.0s)
+    BrainDecision resumeWanderDecision = brain.Update(5.0f, mouse, system, memory, world, physics, &watcher);
+    EXPECT(resumeWanderDecision.action == PetAction::Wandering,
+           "Companion seamlessly transitions from Daydreaming into Wandering");
+    EXPECT(resumeWanderDecision.animState == AnimationState::Walk,
+           "Companion begins walking when wandering resumes");
+    EXPECT(resumeWanderDecision.targetHorizontalSpeed != 0.0f,
+           "Companion moves horizontally when wandering resumes");
+
+    // 3. Test Mouse leaving window while FollowingCursor immediately enters Daydreaming
+    brain.RequestAction(PetAction::FollowingCursor, 5.0f);
+    mouse.OnMouseLeave();
+    BrainDecision immediateDaydream = brain.Update(0.016f, mouse, system, memory, world, physics, &watcher);
+    EXPECT(immediateDaydream.action == PetAction::Daydreaming,
+           "Companion immediately transitions to Daydreaming when cursor leaves window");
+}
+
 int main() {
     namespace fs = std::filesystem;
     const auto previousDirectory = fs::current_path();
@@ -400,6 +748,8 @@ int main() {
     TestMemory();
     TestCompanionLife();
     TestRegressions();
+    TestDesktopInteraction();
+    TestCursorFocusAndDaydreaming();
 
     std::cout << "\n----------------------------------------\n";
     std::cout << "Passed: " << g_testsPassed << " | Failed: " << g_testsFailed << "\n";

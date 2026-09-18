@@ -3,6 +3,7 @@
 #include "Animation.h"
 #include "CompanionLife.h"
 #include "DesktopWorld.h"
+#include "DesktopWatcher.h"
 #include "Memory.h"
 #include "LocalLLM.h"
 #include "MouseSensor.h"
@@ -48,6 +49,8 @@ public:
     void SendCoffee(float amount = 0.35f);
     void TossPlushieHeart();
     void StartStudyMode(float duration = 120.0f);
+    void StopStudyMode();
+    void ToggleStudyMode(float duration = 120.0f);
 
     // Legacy / Convenience wrappers
     void Feed(float amount = 0.35f) { SendCoffee(amount); }
@@ -65,7 +68,12 @@ public:
     void OnLButtonDown(const Point& screenPos);
     void OnLButtonUp(const Point& screenPos);
     void OnMouseMove(const Point& screenPos);
+    void OnRButtonDown(const Point& screenPos);
     void OnRButtonUp(const Point& screenPos);
+    void OnMouseLeave() noexcept;
+
+    void SetMenuOpen(bool open) noexcept;
+    [[nodiscard]] bool IsMenuOpen() const noexcept { return m_brain.IsMenuOpen(); }
 
     // --- Transform & Bounding Queries ---
 
@@ -83,6 +91,8 @@ public:
     [[nodiscard]] const MouseSensor& GetMouseSensor() const noexcept { return m_mouseSensor; }
     [[nodiscard]] const SystemSensor& GetSystemSensor() const noexcept { return m_systemSensor; }
     [[nodiscard]] const DesktopWorld& GetDesktopWorld() const noexcept { return m_desktopWorld; }
+    [[nodiscard]] const DesktopWatcher& GetWatcher() const noexcept { return m_watcher; }
+    [[nodiscard]] DesktopWatcher& GetWatcher() noexcept { return m_watcher; }
     [[nodiscard]] const Memory& GetMemory() const noexcept { return m_memory; }
     [[nodiscard]] Memory& GetMemory() noexcept { return m_memory; }
     [[nodiscard]] const PetBrain& GetBrain() const noexcept { return m_brain; }
@@ -98,6 +108,7 @@ private:
     MouseSensor m_mouseSensor;
     SystemSensor m_systemSensor;
     DesktopWorld m_desktopWorld;
+    DesktopWatcher m_watcher;
     Memory m_memory;
     LocalLLM m_localLlm;
     CompanionLife m_life;

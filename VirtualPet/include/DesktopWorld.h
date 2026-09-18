@@ -42,9 +42,14 @@ struct TaskbarInfo {
 struct WindowSurface {
 #ifdef _WIN32
     HWND hwnd{nullptr};
+#else
+    unsigned long xwin{0};
 #endif
     Rect bounds{0, 0, 0, 0};
     std::string title;
+    std::string appClass;
+    bool isMoved{false};
+    bool isGone{false};
 };
 
 /**
@@ -81,6 +86,11 @@ public:
     /// Returns detected open window surfaces.
     [[nodiscard]] const std::vector<WindowSurface>& GetWindowSurfaces() const noexcept { return m_windowSurfaces; }
 
+    /// Returns the active / focused foreground window.
+    [[nodiscard]] const WindowSurface& GetActiveWindow() const noexcept { return m_activeWindow; }
+    [[nodiscard]] bool HasActiveWindow() const noexcept { return !m_activeWindow.title.empty() || !m_activeWindow.appClass.empty(); }
+    void SetActiveWindow(const WindowSurface& ws) noexcept { m_activeWindow = ws; }
+
     /// Clamps an entity's bounding box so it remains inside the desktop work area.
     [[nodiscard]] Point ClampToWorkArea(const Point& position, int32_t width, int32_t height) const noexcept;
 
@@ -96,9 +106,11 @@ public:
 private:
     std::vector<MonitorInfo> m_monitors;
     std::vector<WindowSurface> m_windowSurfaces;
+    WindowSurface m_activeWindow;
     Rect m_primaryWorkArea{0, 0, 1920, 1080};
     Rect m_virtualScreenBounds{0, 0, 1920, 1080};
     TaskbarInfo m_taskbar;
+    bool m_isFixedGeometry{false};
 
     void DetectTaskbar();
 };

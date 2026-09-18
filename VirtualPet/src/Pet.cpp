@@ -143,9 +143,12 @@ void Pet::Update(float deltaTime) {
 void Pet::UpdateStep(float deltaTime) {
     m_specialAnimationTimer = std::max(0.0f, m_specialAnimationTimer-deltaTime);
     m_worldTimer += deltaTime;
-    if (m_worldTimer >= 0.5f) { m_desktopWorld.Refresh(); m_worldTimer = 0.0f; }
+    if (m_worldTimer >= 1.0f) { m_desktopWorld.Refresh(); m_worldTimer = 0.0f; }
 
     Rect bounds = m_physics.GetBounds();
+
+    // 0. Update desktop watcher
+    m_watcher.Update(deltaTime, bounds, m_desktopWorld);
 
     // 1. Update sensors
     m_mouseSensor.Update(deltaTime, bounds);
@@ -169,7 +172,9 @@ void Pet::UpdateStep(float deltaTime) {
                                             m_systemSensor,
                                             m_memory,
                                             m_desktopWorld,
-                                            m_physics);
+                                            m_physics,
+                                            &m_watcher);
+    m_watcher.ResetFrameFlags();
     const auto& system = m_systemSensor.GetState();
     std::time_t now = std::time(nullptr); std::tm local{};
 #ifdef _WIN32
@@ -216,9 +221,13 @@ void Pet::UpdateStep(float deltaTime) {
     // 5. Apply movement intent to physics
     if (!m_physics.IsDragged()) {
         if (m_physics.IsGrounded()) {
-            m_physics.SetVelocity(decision.targetHorizontalSpeed, m_physics.GetVelocityY());
-            if (decision.wantJump) {
-                m_physics.ApplyImpulse(0.0f, -420.0f);
+            if (m_brain.IsMenuOpen()) {
+                m_physics.SetVelocity(0.0f, m_physics.GetVelocityY());
+            } else {
+                m_physics.SetVelocity(decision.targetHorizontalSpeed, m_physics.GetVelocityY());
+                if (decision.wantJump) {
+                    m_physics.ApplyImpulse(0.0f, -420.0f);
+                }
             }
         }
     }
@@ -317,7 +326,17 @@ void Pet::SendCoffee(float amount) {
 
 void Pet::TossPlushieHeart() {
     Point petPos = m_physics.GetPosition();
-    float throwVx = m_animation.IsFacingLeft() ? -270.0f : 270.0f;
+    Rect workArea = m_desktopWorld.GetPrimaryWorkArea();
+    float throwVx = 270.0f;
+    if (petPos.x > workArea.x + workArea.width - 250) {
+        throwVx = -270.0f;
+        m_animation.SetFacingLeft(true);
+    } else if (petPos.x < workArea.x + 250) {
+        throwVx = 270.0f;
+        m_animation.SetFacingLeft(false);
+    } else {
+        throwVx = m_animation.IsFacingLeft() ? -270.0f : 270.0f;
+    }
     m_physics.SpawnToy(static_cast<float>(petPos.x + m_physics.GetWidth() / 2),
                        static_cast<float>(petPos.y - 30),
                        throwVx, -240.0f, false);
@@ -330,9 +349,32 @@ void Pet::StartStudyMode(float duration) {
     // transitions to StudyMode in the next UpdateStep call.
 }
 
+void Pet::StopStudyMode() {
+    m_brain.StopStudyMode();
+    m_studyAnimActive = false;
+}
+
+void Pet::ToggleStudyMode(float duration) {
+    if (m_brain.IsInStudyMode()) {
+        StopStudyMode();
+    } else {
+        StartStudyMode(duration);
+    }
+}
+
 void Pet::DropToy(bool isTreat) {
     Point petPos = m_physics.GetPosition();
-    float throwVx = m_animation.IsFacingLeft() ? -260.0f : 260.0f;
+    Rect workArea = m_desktopWorld.GetPrimaryWorkArea();
+    float throwVx = 260.0f;
+    if (petPos.x > workArea.x + workArea.width - 250) {
+        throwVx = -260.0f;
+        m_animation.SetFacingLeft(true);
+    } else if (petPos.x < workArea.x + 250) {
+        throwVx = 260.0f;
+        m_animation.SetFacingLeft(false);
+    } else {
+        throwVx = m_animation.IsFacingLeft() ? -260.0f : 260.0f;
+    }
     m_physics.SpawnToy(static_cast<float>(petPos.x + m_physics.GetWidth() / 2),
                        static_cast<float>(petPos.y - 30),
                        throwVx, -220.0f, isTreat);
@@ -350,8 +392,24 @@ void Pet::OnMouseMove(const Point& screenPos) {
     m_mouseSensor.OnMouseMove(screenPos, m_physics.GetBounds());
 }
 
+void Pet::OnRButtonDown(const Point& screenPos) {
+    m_mouseSensor.OnButtonDown(false, screenPos, m_physics.GetBounds());
+    SetMenuOpen(true);
+}
+
 void Pet::OnRButtonUp(const Point& screenPos) {
     m_mouseSensor.OnButtonUp(false, screenPos);
+}
+
+void Pet::OnMouseLeave() noexcept {
+    m_mouseSensor.OnMouseLeave();
+}
+
+void Pet::SetMenuOpen(bool open) noexcept {
+    m_brain.SetMenuOpen(open);
+    if (open) {
+        m_physics.SetVelocity(0.0f, m_physics.GetVelocityY());
+    }
 }
 
 } // namespace VirtualPet

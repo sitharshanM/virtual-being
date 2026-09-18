@@ -96,6 +96,9 @@ public:
     void ResetFrameState();
     void CancelInteraction() noexcept;
 
+    /// Notify sensor that cursor has left the window or interaction space.
+    void OnMouseLeave() noexcept;
+
     // --- State Queries ---
 
     [[nodiscard]] const MouseState& GetState() const noexcept { return m_state; }
