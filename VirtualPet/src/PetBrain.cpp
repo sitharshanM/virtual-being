@@ -281,7 +281,18 @@ BrainDecision PetBrain::Update(float deltaTime,
         }
     }
 
-    // 1. High Priority Direct Sensory Overrides: Dragging
+    // 1. Right-Click Context Menu Open: freeze in place attentively
+    if (m_isMenuOpen) {
+        BrainDecision d;
+        d.action = (m_currentAction == PetAction::SittingOnWindow) ? PetAction::SittingOnWindow : PetAction::Idle;
+        d.animState = (m_currentAction == PetAction::SittingOnWindow) ? AnimationState::SitHang : AnimationState::Idle;
+        d.targetHorizontalSpeed = 0.0f;
+        d.facingLeft = m_facingLeft;
+        d.thought = "I'm all ears! What would you like to do? 💕";
+        return d;
+    }
+
+    // 2. High Priority Direct Sensory Overrides: Dragging
     if (physics.IsDragged()) {
         m_currentAction = PetAction::Dragged;
         m_currentThought = "Kyaaa! Where are you taking me?! Put me down gently, okay? 💕";
@@ -293,6 +304,30 @@ BrainDecision PetBrain::Update(float deltaTime,
         d.facingLeft = m_facingLeft;
         d.thought = m_currentThought;
         return d;
+    } else if (m_currentAction == PetAction::Dragged) {
+        // Just released from drag/throw!
+        if (!physics.IsGrounded()) {
+            // Pet is airborne (thrown or dropped from height)
+            m_currentAction = PetAction::Falling;
+            m_actionTimer = 0.0f;
+            if (std::abs(physics.GetVelocityX()) > 220.0f || std::abs(physics.GetVelocityY()) > 220.0f) {
+                m_currentThought = "Wheee~! Flying through the air! 💨✨";
+            } else {
+                m_currentThought = "Falling gently down~! 🐾";
+            }
+            BrainDecision d;
+            d.action = PetAction::Falling;
+            d.animState = AnimationState::Fall;
+            d.targetHorizontalSpeed = 0.0f;
+            d.facingLeft = (physics.GetVelocityX() < 0.0f);
+            d.thought = m_currentThought;
+            return d;
+        } else {
+            // Placed directly onto ground
+            m_currentAction = PetAction::Idle;
+            m_actionTimer = 0.3f;
+            m_currentThought = "Placed back down gently~ thank you 💕";
+        }
     }
 
     // 2. Direct Sensory Overrides: Headpat / Click
@@ -371,7 +406,7 @@ BrainDecision PetBrain::Update(float deltaTime,
     if (m_currentAction == PetAction::Falling) {
         if (physics.IsGrounded()) {
             m_currentAction = PetAction::Idle;
-            m_actionTimer = 1.0f;
+            m_actionTimer = 0.5f;
             m_currentThought = "Oof! Safe landing on my feet! 🌸";
             BrainDecision d;
             d.action = PetAction::Idle;

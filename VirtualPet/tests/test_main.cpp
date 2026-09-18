@@ -268,6 +268,16 @@ void TestRegressions() {
 
         pet.TossPlushieHeart();
         EXPECT(pet.GetPhysics().GetToy().active && !pet.GetPhysics().GetToy().isTreat, "Plushie heart spawned in physics world");
+
+        // Test right-click context menu freezing
+        pet.OnRButtonDown(Point(20, 20));
+        EXPECT(pet.IsMenuOpen(), "Right click opens menu state on Pet");
+        pet.Update(0.016f);
+        EXPECT(pet.GetPhysics().GetVelocityX() == 0.0f, "Pet velocity is zeroed while menu is open");
+        EXPECT(pet.GetBrain().IsMenuOpen(), "Pet brain registers menu open");
+
+        pet.SetMenuOpen(false);
+        EXPECT(!pet.IsMenuOpen(), "Dismissing menu clears open state on Pet");
     }
     fs::remove("pet_integration_config.json");
     fs::remove("pet_integration_state.json");
@@ -560,6 +570,45 @@ void TestDesktopInteraction() {
 
     BrainDecision activeDecision = brain.Update(0.016f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
     EXPECT(!activeDecision.thought.empty(), "Brain produces non-empty thought reflecting active window");
+
+    // 11. Test Drag Release & Airborne Throwing Transitions
+    physics.StartDragging(Point(500, 300), Point(50, 50));
+    BrainDecision dragDecision = brain.Update(0.016f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+    EXPECT(dragDecision.action == PetAction::Dragged, "Pet enters Dragged state when mouse dragged");
+
+    // Release mouse while in mid-air (simulate throw/drop)
+    physics.StopDragging();
+    physics.SetPosition(500.0f, 300.0f); // mid-air, not grounded
+    physics.SetVelocity(300.0f, -150.0f);
+    BrainDecision throwDecision = brain.Update(0.016f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+    EXPECT(throwDecision.action == PetAction::Falling, "Pet immediately enters Falling state upon airborne throw release");
+    EXPECT(throwDecision.animState == AnimationState::Fall, "Pet plays Fall animation when thrown airborne");
+
+    // Land on ground
+    physics.SetPosition(500.0f, static_cast<float>(singleMaximizedWorld.GetGroundY(500, 100, 0)));
+    physics.SetVelocity(0.0f, 0.0f);
+    physics.Update(0.016f, singleMaximizedWorld);
+    BrainDecision landThrowDecision = brain.Update(0.016f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+    EXPECT(landThrowDecision.animState == AnimationState::Land, "Pet plays Land animation upon touchdown after throw");
+
+    // After brief landing recovery (0.55s), pet must naturally resume active behavior without being frozen
+    BrainDecision resumeDecision = brain.Update(0.55f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+    EXPECT(resumeDecision.action != PetAction::Dragged && resumeDecision.action != PetAction::Falling,
+           "Pet resumes autonomous activity without getting stuck in inactive/concussed freeze");
+
+    // 12. Test Right-Click Context Menu Stillness
+    brain.SetMenuOpen(true);
+    EXPECT(brain.IsMenuOpen() == true, "Brain records menu open state");
+    BrainDecision menuDecision = brain.Update(0.016f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+    EXPECT(menuDecision.targetHorizontalSpeed == 0.0f, "Pet stops horizontal movement while menu is open");
+    EXPECT(menuDecision.animState == AnimationState::Idle, "Pet assumes still Idle animation while menu is open");
+    EXPECT(!menuDecision.thought.empty(), "Pet displays attentive thought while menu is open");
+
+    // When menu is closed, brain resumes normal operations
+    brain.SetMenuOpen(false);
+    EXPECT(brain.IsMenuOpen() == false, "Brain records menu closed state");
+    BrainDecision postMenuDecision = brain.Update(0.016f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+    EXPECT(postMenuDecision.action != PetAction::Dragged, "Pet operates normally after menu closes");
 }
 
 int main() {

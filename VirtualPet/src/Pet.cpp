@@ -221,9 +221,13 @@ void Pet::UpdateStep(float deltaTime) {
     // 5. Apply movement intent to physics
     if (!m_physics.IsDragged()) {
         if (m_physics.IsGrounded()) {
-            m_physics.SetVelocity(decision.targetHorizontalSpeed, m_physics.GetVelocityY());
-            if (decision.wantJump) {
-                m_physics.ApplyImpulse(0.0f, -420.0f);
+            if (m_brain.IsMenuOpen()) {
+                m_physics.SetVelocity(0.0f, m_physics.GetVelocityY());
+            } else {
+                m_physics.SetVelocity(decision.targetHorizontalSpeed, m_physics.GetVelocityY());
+                if (decision.wantJump) {
+                    m_physics.ApplyImpulse(0.0f, -420.0f);
+                }
             }
         }
     }
@@ -355,8 +359,20 @@ void Pet::OnMouseMove(const Point& screenPos) {
     m_mouseSensor.OnMouseMove(screenPos, m_physics.GetBounds());
 }
 
+void Pet::OnRButtonDown(const Point& screenPos) {
+    m_mouseSensor.OnButtonDown(false, screenPos, m_physics.GetBounds());
+    SetMenuOpen(true);
+}
+
 void Pet::OnRButtonUp(const Point& screenPos) {
     m_mouseSensor.OnButtonUp(false, screenPos);
+}
+
+void Pet::SetMenuOpen(bool open) noexcept {
+    m_brain.SetMenuOpen(open);
+    if (open) {
+        m_physics.SetVelocity(0.0f, m_physics.GetVelocityY());
+    }
 }
 
 } // namespace VirtualPet

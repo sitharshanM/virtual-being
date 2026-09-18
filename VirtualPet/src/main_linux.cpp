@@ -292,6 +292,7 @@ gboolean OnPetButtonPress(GtkWidget* /*widget*/, GdkEventButton* event, gpointer
         g_pet->OnLButtonDown(VirtualPet::Point(screenX, screenY));
         return TRUE;
     } else if (event->button == 3) {
+        g_pet->OnRButtonDown(VirtualPet::Point(screenX, screenY));
         ShowPetContextMenu(event);
         return TRUE;
     }
@@ -369,7 +370,11 @@ void OnMenuExit(GtkMenuItem* /*item*/, gpointer /*data*/) {
 }
 
 void ShowPetContextMenu(GdkEventButton* event) {
+    if (g_pet) g_pet->SetMenuOpen(true);
     GtkWidget* menu = gtk_menu_new();
+    g_signal_connect(menu, "deactivate", G_CALLBACK(+[](GtkMenuShell*, gpointer) {
+        if (g_pet) g_pet->SetMenuOpen(false);
+    }), nullptr);
 
     GtkWidget* itemToggle = gtk_menu_item_new_with_label(g_isPetVisible ? "Hide Companion" : "Show Companion");
     g_signal_connect(itemToggle, "activate", G_CALLBACK(OnMenuToggleVisible), nullptr);

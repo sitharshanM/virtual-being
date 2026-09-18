@@ -90,6 +90,9 @@ public:
 
     [[nodiscard]] std::string GenerateAppThought(const std::string& title, const std::string& appClass, bool isOnWindow);
 
+    void SetMenuOpen(bool open) noexcept { m_isMenuOpen = open; }
+    [[nodiscard]] bool IsMenuOpen() const noexcept { return m_isMenuOpen; }
+
 private:
     void BuildBehaviorTree();
 
@@ -116,6 +119,7 @@ private:
     float m_thoughtTimer{0.0f};
     std::string m_lastActiveTitle;
     size_t m_thoughtCycle{0};
+    bool m_isMenuOpen{false};
 };
 
 } // namespace VirtualPet

@@ -235,6 +235,7 @@ void ShowPetStatusDialog(HWND hwnd) {
 }
 
 void ShowPetContextMenu(HWND hwnd, POINT pt) {
+    if (g_pet) g_pet->SetMenuOpen(true);
     HMENU hMenu = ::CreatePopupMenu();
     ::AppendMenuW(hMenu, MF_STRING, ID_MENU_TOGGLE_VISIBLE, g_isPetVisible ? L"&Hide Companion" : L"&Show Companion");
     ::AppendMenuW(hMenu, MF_STRING, ID_MENU_STATUS, L"&Relationship Diary & Status... 💌");
@@ -255,6 +256,7 @@ void ShowPetContextMenu(HWND hwnd, POINT pt) {
     ::SetForegroundWindow(hwnd);
     ::TrackPopupMenu(hMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr);
     ::DestroyMenu(hMenu);
+    if (g_pet) g_pet->SetMenuOpen(false);
 }
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -399,6 +401,15 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_CAPTURECHANGED:
             if (g_pet && g_pet->GetMouseSensor().IsLeftButtonDown()) g_pet->CancelInteraction();
             return 0;
+
+        case WM_RBUTTONDOWN: {
+            POINT pt{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+            ::ClientToScreen(hwnd, &pt);
+            if (g_pet) {
+                g_pet->OnRButtonDown(VirtualPet::Point(pt.x, pt.y));
+            }
+            return 0;
+        }
 
         case WM_RBUTTONUP: {
             POINT pt{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};

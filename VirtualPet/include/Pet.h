@@ -66,7 +66,11 @@ public:
     void OnLButtonDown(const Point& screenPos);
     void OnLButtonUp(const Point& screenPos);
     void OnMouseMove(const Point& screenPos);
+    void OnRButtonDown(const Point& screenPos);
     void OnRButtonUp(const Point& screenPos);
+
+    void SetMenuOpen(bool open) noexcept;
+    [[nodiscard]] bool IsMenuOpen() const noexcept { return m_brain.IsMenuOpen(); }
 
     // --- Transform & Bounding Queries ---
 
