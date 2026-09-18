@@ -123,7 +123,8 @@ LRESULT CALLBACK BubbleWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         HPEN outline = CreatePen(PS_SOLID, 2, RGB(116, 72, 91));
         auto oldBrush = SelectObject(dc, bubble); auto oldPen = SelectObject(dc, outline);
         RoundRect(dc, 3, 3, client.right - 4, client.bottom - 14, 18, 18);
-        POINT tail[3]{{client.right - 55, client.bottom - 15},{client.right - 30, client.bottom - 2},{client.right - 35, client.bottom - 17}};
+        int centerX = (client.right - client.left) / 2;
+        POINT tail[3]{{centerX - 10, client.bottom - 15}, {centerX, client.bottom - 2}, {centerX + 10, client.bottom - 15}};
         Polygon(dc, tail, 3);
         SelectObject(dc, oldBrush); SelectObject(dc, oldPen); DeleteObject(bubble); DeleteObject(outline);
         SetBkMode(dc, TRANSPARENT); SetTextColor(dc, RGB(42, 29, 36));
@@ -572,9 +573,11 @@ int RunApplication(HINSTANCE hInstance) {
                 if (nextText != g_bubbleText) { g_bubbleText = nextText; InvalidateRect(g_bubbleWindow, nullptr, FALSE); }
                 if (g_isPetVisible && !g_bubbleText.empty()) {
                     const auto bubblePos = g_pet->GetPosition();
-                    const int bubbleX = bubblePos.x + width / 2 - 260;
-                    const int bubbleY = (bubblePos.y >= 96) ? bubblePos.y - 88 : bubblePos.y + 8;
-                    SetWindowPos(g_bubbleWindow, nullptr, bubbleX, bubbleY, 300, 92,
+                    const int bubbleW = 300;
+                    const int bubbleH = 92;
+                    const int bubbleX = bubblePos.x + (width - bubbleW) / 2;
+                    const int bubbleY = (bubblePos.y >= bubbleH + 8) ? bubblePos.y - bubbleH + 4 : bubblePos.y + height + 6;
+                    SetWindowPos(g_bubbleWindow, nullptr, bubbleX, bubbleY, bubbleW, bubbleH,
                                  SWP_NOACTIVATE | SWP_NOZORDER | SWP_SHOWWINDOW);
                 } else ShowWindow(g_bubbleWindow, SW_HIDE);
             }

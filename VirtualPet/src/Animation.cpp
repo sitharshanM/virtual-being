@@ -14,20 +14,34 @@ namespace VirtualPet {
 
 const char* AnimationStateToString(AnimationState state) noexcept {
     switch (state) {
-        case AnimationState::Idle:     return "idle";
-        case AnimationState::Walk:     return "walk";
-        case AnimationState::Run:      return "run";
-        case AnimationState::Reaction: return "reactions";
-        case AnimationState::Custom:   return "custom";
-        default:                       return "idle";
+        case AnimationState::Idle:       return "idle";
+        case AnimationState::Walk:       return "walk";
+        case AnimationState::Run:        return "run";
+        case AnimationState::Reaction:   return "reactions";
+        case AnimationState::Sit:        return "sitting-idle";
+        case AnimationState::SitHang:    return "sitting-hang";
+        case AnimationState::Fall:       return "fall";
+        case AnimationState::Land:       return "land";
+        case AnimationState::ClimbUp:    return "climb";
+        case AnimationState::Sleep:      return "resting";
+        case AnimationState::LookAround: return "curious-tilt";
+        case AnimationState::Custom:     return "custom";
+        default:                         return "idle";
     }
 }
 
 AnimationState StringToAnimationState(const std::string& name) noexcept {
-    if (name == "idle")      return AnimationState::Idle;
-    if (name == "walk")      return AnimationState::Walk;
-    if (name == "run")       return AnimationState::Run;
+    if (name == "idle")                            return AnimationState::Idle;
+    if (name == "walk")                            return AnimationState::Walk;
+    if (name == "run")                             return AnimationState::Run;
     if (name == "reactions" || name == "reaction") return AnimationState::Reaction;
+    if (name == "sitting-idle" || name == "sit")   return AnimationState::Sit;
+    if (name == "sitting-hang")                    return AnimationState::SitHang;
+    if (name == "fall")                            return AnimationState::Fall;
+    if (name == "land")                            return AnimationState::Land;
+    if (name == "climb")                           return AnimationState::ClimbUp;
+    if (name == "resting" || name == "sleep")      return AnimationState::Sleep;
+    if (name == "curious-tilt" || name == "look")  return AnimationState::LookAround;
     return AnimationState::Custom;
 }
 
@@ -104,7 +118,41 @@ void Animation::RegisterClip(const std::string& name, AnimationClip clip) {
 
 void Animation::Play(AnimationState state, bool restartIfSame) {
     m_currentState = state;
-    PlayClip(AnimationStateToString(state), restartIfSame);
+    std::string targetClip = AnimationStateToString(state);
+
+    if (m_clips.find(targetClip) == m_clips.end()) {
+        switch (state) {
+            case AnimationState::Sit:
+                targetClip = m_clips.count("sitting-idle") ? "sitting-idle" : "idle";
+                break;
+            case AnimationState::SitHang:
+                targetClip = m_clips.count("sitting-hang") ? "sitting-hang"
+                           : (m_clips.count("sitting-idle") ? "sitting-idle" : "idle");
+                break;
+            case AnimationState::ClimbUp:
+                targetClip = m_clips.count("climb") ? "climb" : "walk";
+                break;
+            case AnimationState::Fall:
+                targetClip = m_clips.count("fall") ? "fall"
+                           : (m_clips.count("reactions") ? "reactions" : "idle");
+                break;
+            case AnimationState::Land:
+                targetClip = m_clips.count("land") ? "land"
+                           : (m_clips.count("reactions") ? "reactions" : "idle");
+                break;
+            case AnimationState::Sleep:
+                targetClip = m_clips.count("resting") ? "resting" : "idle";
+                break;
+            case AnimationState::LookAround:
+                targetClip = m_clips.count("curious-tilt") ? "curious-tilt" : "idle";
+                break;
+            default:
+                break;
+        }
+    }
+
+    PlayClip(targetClip, restartIfSame);
+    m_currentState = state;
 }
 
 void Animation::PlayClip(const std::string& clipName, bool restartIfSame) {
@@ -117,7 +165,7 @@ void Animation::PlayClip(const std::string& clipName, bool restartIfSame) {
     m_frameTimer = 0.0f;
     m_isFinished = false;
     if (clipName == "idle" || clipName == "walk" || clipName == "run" ||
-        clipName == "reaction") {
+        clipName == "reaction" || clipName == "reactions") {
         m_currentState = StringToAnimationState(clipName);
     }
 }
@@ -133,7 +181,7 @@ void Animation::Update(float deltaTime) {
     if (!frame) return;
 
     float duration = (frame->durationSeconds > 0.0f) ? frame->durationSeconds : 0.1f;
-    m_frameTimer += deltaTime;
+    m_frameTimer += deltaTime * m_playbackSpeed;
 
     while (m_frameTimer >= duration && duration > 0.0f) {
         m_frameTimer -= duration;
@@ -145,6 +193,9 @@ void Animation::Update(float deltaTime) {
             } else {
                 m_currentFrameIndex = clip.GetFrameCount() - 1;
                 m_isFinished = true;
+                if (m_onComplete) {
+                    m_onComplete(m_currentState);
+                }
                 break;
             }
         }

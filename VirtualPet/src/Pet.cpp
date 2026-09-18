@@ -143,9 +143,12 @@ void Pet::Update(float deltaTime) {
 void Pet::UpdateStep(float deltaTime) {
     m_specialAnimationTimer = std::max(0.0f, m_specialAnimationTimer-deltaTime);
     m_worldTimer += deltaTime;
-    if (m_worldTimer >= 0.5f) { m_desktopWorld.Refresh(); m_worldTimer = 0.0f; }
+    if (m_worldTimer >= 1.0f) { m_desktopWorld.Refresh(); m_worldTimer = 0.0f; }
 
     Rect bounds = m_physics.GetBounds();
+
+    // 0. Update desktop watcher
+    m_watcher.Update(deltaTime, bounds, m_desktopWorld);
 
     // 1. Update sensors
     m_mouseSensor.Update(deltaTime, bounds);
@@ -169,7 +172,9 @@ void Pet::UpdateStep(float deltaTime) {
                                             m_systemSensor,
                                             m_memory,
                                             m_desktopWorld,
-                                            m_physics);
+                                            m_physics,
+                                            &m_watcher);
+    m_watcher.ResetFrameFlags();
     const auto& system = m_systemSensor.GetState();
     std::time_t now = std::time(nullptr); std::tm local{};
 #ifdef _WIN32

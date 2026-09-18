@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include(CTest)
 add_library(PetCore
-    src/Animation.cpp src/BehaviorTree.cpp src/CompanionLife.cpp src/DesktopWorld.cpp src/Memory.cpp
+    src/Animation.cpp src/BehaviorTree.cpp src/CompanionLife.cpp src/DesktopWorld.cpp src/DesktopWatcher.cpp src/Memory.cpp
     src/MouseSensor.cpp src/LocalLLM.cpp src/Pet.cpp src/PetBrain.cpp src/Physics.cpp
     src/SaveManager.cpp src/SystemSensor.cpp)
 target_include_directories(PetCore PUBLIC include PRIVATE third_party)
@@ -17,6 +17,12 @@ else()
     target_sources(PetCore PRIVATE src/Animation_linux.cpp)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
+    pkg_check_modules(X11 x11)
+    if(X11_FOUND)
+        target_compile_definitions(PetCore PUBLIC HAVE_X11)
+        target_include_directories(PetCore PUBLIC ${X11_INCLUDE_DIRS})
+        target_link_libraries(PetCore PUBLIC ${X11_LIBRARIES})
+    endif()
     target_include_directories(PetCore PUBLIC ${GTK3_INCLUDE_DIRS})
     target_link_libraries(PetCore PUBLIC ${GTK3_LIBRARIES})
     add_executable(VirtualPet src/main_linux.cpp)

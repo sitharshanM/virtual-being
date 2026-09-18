@@ -4,6 +4,7 @@
 #include "../include/Physics.h"
 #include "../include/SaveManager.h"
 #include "../include/CompanionLife.h"
+#include "../include/DesktopWatcher.h"
 
 #include <cassert>
 #include <cmath>
@@ -384,6 +385,183 @@ void TestRegressions() {
 #endif
 }
 
+void TestDesktopInteraction() {
+    std::cout << "Running TestDesktopInteraction (Milestone 1)...\n";
+
+    // 1. Test Animation States and Graceful Fallbacks
+    Animation anim;
+    anim.Play(AnimationState::ClimbUp);
+    EXPECT(anim.GetCurrentState() == AnimationState::ClimbUp, "ClimbUp animation state activates");
+    EXPECT(anim.GetCurrentClipName() == "walk", "ClimbUp gracefully fakes walk clip when dedicated sprite is absent");
+
+    anim.Play(AnimationState::SitHang);
+    EXPECT(anim.GetCurrentState() == AnimationState::SitHang, "SitHang animation state activates");
+    EXPECT(anim.GetCurrentClipName() == "idle" || anim.GetCurrentClipName() == "sitting-idle", "SitHang gracefully fakes idle clip");
+
+    anim.Play(AnimationState::Fall);
+    EXPECT(anim.GetCurrentState() == AnimationState::Fall, "Fall animation state activates");
+
+    anim.Play(AnimationState::Land);
+    EXPECT(anim.GetCurrentState() == AnimationState::Land, "Land animation state activates");
+
+    // 2. Test DesktopWatcher Surface Tracking & Nearest Surface
+    WindowSurface ws1;
+    ws1.bounds = Rect(200, 400, 600, 300);
+    ws1.title = "Visual Studio Code - main.cpp";
+#ifdef _WIN32
+    ws1.hwnd = (HWND)0x1234;
+#else
+    ws1.xwin = 0x1234;
+#endif
+
+    WindowSurface ws2;
+    ws2.bounds = Rect(900, 500, 500, 400);
+    ws2.title = "Alacritty - bash terminal";
+#ifdef _WIN32
+    ws2.hwnd = (HWND)0x5678;
+#else
+    ws2.xwin = 0x5678;
+#endif
+
+    DesktopWorld testWorld(Rect(0, 0, 1920, 1080), {ws1, ws2});
+    DesktopWatcher watcher;
+    watcher.SetRefreshInterval(0.1f);
+
+    // Nearest surface selection
+    const WindowSurface* nearest = watcher.GetNearestSurface(Point(250, 600), testWorld);
+    EXPECT(nearest != nullptr && nearest->title == ws1.title, "Nearest surface found correctly");
+
+    const WindowSurface* nearest2 = watcher.GetNearestSurface(Point(1000, 600), testWorld);
+    EXPECT(nearest2 != nullptr && nearest2->title == ws2.title, "Nearest surface switches based on proximity");
+
+    // 3. Test Pet Standing on Window Top
+    Rect petOnWindow(250, 300, 100, 100);
+    watcher.Update(0.016f, petOnWindow, testWorld);
+    EXPECT(watcher.GetCurrentSurface() != nullptr && watcher.GetCurrentSurface()->title == ws1.title,
+           "Pet correctly detected as resting on window top surface");
+
+    // 4. Test Window Movement Diff
+    WindowSurface ws1Moved = ws1;
+    ws1Moved.bounds = Rect(250, 420, 600, 300);
+    DesktopWorld movedWorld(Rect(0, 0, 1920, 1080), {ws1Moved, ws2});
+    watcher.Update(0.15f, petOnWindow, movedWorld);
+    EXPECT(watcher.SurfaceJustMoved(), "Surface movement detected by watcher");
+    EXPECT(watcher.GetSurfaceMoveDelta().x == 50 && watcher.GetSurfaceMoveDelta().y == 20,
+           "Watcher calculated exact surface translation delta");
+
+    // 5. Test Window Disappearance (Surface Gone)
+    DesktopWorld closedWorld(Rect(0, 0, 1920, 1080), {ws2});
+    watcher.Update(0.15f, petOnWindow, closedWorld);
+    EXPECT(watcher.SurfaceJustGone(), "Watcher detected closed/vanished window surface");
+
+    // 6. Test PetBrain Reactions to Window Dynamics
+    MouseSensor mouse;
+    SystemSensor system;
+    Physics physics;
+    physics.SetDimensions(100, 100);
+    physics.SetPosition(250.0f, 300.0f);
+    Memory memory;
+    PetBrain brain;
+
+    BrainDecision fallDecision = brain.Update(0.016f, mouse, system, memory, closedWorld, physics, &watcher);
+    EXPECT(fallDecision.action == PetAction::Falling, "Pet enters Falling action when window vanishes");
+    EXPECT(fallDecision.animState == AnimationState::Fall, "Pet plays Fall animation");
+    watcher.ResetFrameFlags();
+
+    // Pet landing on ground after fall
+    physics.SetPosition(250.0f, static_cast<float>(closedWorld.GetGroundY(250, 100, 0)));
+    physics.SetVelocity(0.0f, 0.0f);
+    physics.Update(0.016f, closedWorld);
+    BrainDecision landDecision = brain.Update(0.016f, mouse, system, memory, closedWorld, physics, &watcher);
+    EXPECT(landDecision.action == PetAction::Idle, "Pet returns to Idle upon landing");
+    EXPECT(landDecision.animState == AnimationState::Land, "Pet plays Land animation upon touchdown");
+
+    // 7. Test Keyword Matching on Window Sit
+    DesktopWatcher climbWatcher;
+    climbWatcher.SetRefreshInterval(0.1f);
+    DesktopWorld codeWorld(Rect(0, 0, 1920, 1080), {ws1});
+    climbWatcher.Update(0.15f, Rect(200, 700, 100, 100), codeWorld);
+
+    brain.RequestAction(PetAction::ClimbingWindow, 0.8f);
+    BrainDecision climbStep = brain.Update(0.016f, mouse, system, memory, codeWorld, physics, &climbWatcher);
+    EXPECT(climbStep.action == PetAction::ClimbingWindow && climbStep.animState == AnimationState::ClimbUp,
+           "Pet climbs window with ClimbUp animation");
+
+    BrainDecision sitDecision = brain.Update(0.85f, mouse, system, memory, codeWorld, physics, &climbWatcher);
+    EXPECT(sitDecision.action == PetAction::SittingOnWindow, "Pet sits on window after climb completion");
+    EXPECT(sitDecision.animState == AnimationState::SitHang, "Pet sits with SitHang animation state");
+
+    // 8. Test Headroom Clearance Edge Case (Maximized / Ceiling-Docked Windows)
+    WindowSurface topDockedWindow;
+    topDockedWindow.bounds = Rect(0, 47, 1920, 1033); // e.g. Hyprland single window tiled below Waybar
+    topDockedWindow.title = "virtual-being - Antigravity IDE";
+    topDockedWindow.appClass = "antigravity-ide";
+
+    DesktopWorld singleMaximizedWorld(Rect(0, 0, 1920, 1080), {topDockedWindow});
+    DesktopWatcher headroomWatcher;
+
+    // Nearest surface must reject top-docked window because bounds.y (47) - petHeight (120) = -73 < 0 + 10
+    const WindowSurface* noSurface = headroomWatcher.GetNearestSurface(Point(500, 500), singleMaximizedWorld, 120);
+    EXPECT(noSurface == nullptr, "Watcher rejects top-docked window with insufficient ceiling headroom");
+    EXPECT(!headroomWatcher.HasClimbableSurfaces(singleMaximizedWorld, 120), "HasClimbableSurfaces returns false for zero headroom");
+
+    // Supporting surface check ignores surface that forces pet off-screen, falling back to desktop floor
+    int32_t groundY = singleMaximizedWorld.GetGroundY(500, 120, 0);
+    EXPECT(singleMaximizedWorld.GetSupportingSurfaceY(500, 47, 100, 120, 0) == groundY,
+           "DesktopWorld rejects supporting surface that pushes pet off top screen edge and uses floor");
+
+    // Utility scores must not attempt climb (windowScore == 0) on single maximized screen
+    UtilityScores scores = brain.CalculateUtilityScores(memory, mouse, system, physics, &headroomWatcher, &singleMaximizedWorld);
+    EXPECT(scores.windowScore == 0.0f, "Pet utility engine gives 0 windowScore when no climbable windows exist");
+
+    // 9. Test Dynamic Contextual Thought Generation & Active App Awareness
+    std::string kittyThought1 = brain.GenerateAppThought("~", "kitty", false);
+    EXPECT(!kittyThought1.empty(), "Kitty terminal with '~' title generates valid thought");
+    EXPECT(kittyThought1.find("Terminal") != std::string::npos || kittyThought1.find("terminal") != std::string::npos ||
+           kittyThought1.find("CLI") != std::string::npos || kittyThought1.find("command") != std::string::npos,
+           "Terminal class triggers terminal-specific reaction");
+
+    std::string kittyThought2 = brain.GenerateAppThought("~", "kitty", false);
+    EXPECT(kittyThought1 != kittyThought2, "Successive thoughts rotate rather than repeating static text");
+
+    std::string winTermThought = brain.GenerateAppThought("Windows PowerShell", "CASCADIA_HOSTING_WINDOW_CLASS", false);
+    EXPECT(winTermThought.find("Terminal") != std::string::npos || winTermThought.find("terminal") != std::string::npos ||
+           winTermThought.find("CLI") != std::string::npos || winTermThought.find("Command") != std::string::npos ||
+           winTermThought.find("command") != std::string::npos || winTermThought.find("Compiling") != std::string::npos ||
+           winTermThought.find("shell") != std::string::npos,
+           "Windows Terminal class triggers terminal reaction dynamically");
+
+    std::string cmdThought = brain.GenerateAppThought("Command Prompt - ping 127.0.0.1", "ConsoleWindowClass", false);
+    EXPECT(cmdThought.find("Terminal") != std::string::npos || cmdThought.find("terminal") != std::string::npos ||
+           cmdThought.find("CLI") != std::string::npos || cmdThought.find("command") != std::string::npos ||
+           cmdThought.find("Compiling") != std::string::npos || cmdThought.find("shell") != std::string::npos,
+           "Windows ConsoleWindowClass cmd triggers terminal reaction dynamically");
+
+    std::string codeThought1 = brain.GenerateAppThought("virtual-being - Antigravity IDE", "antigravity-ide", false);
+    EXPECT(!codeThought1.empty(), "Antigravity IDE generates valid thought");
+    EXPECT(codeThought1.find("code") != std::string::npos || codeThought1.find("Coding") != std::string::npos ||
+           codeThought1.find("keyboard") != std::string::npos || codeThought1.find("rubber duck") != std::string::npos ||
+           codeThought1.find("bugs") != std::string::npos || codeThought1.find("flow state") != std::string::npos ||
+           codeThought1.find("functions") != std::string::npos || codeThought1.find("commit") != std::string::npos ||
+           codeThought1.find("logic") != std::string::npos,
+           "IDE triggers coding-specific reaction");
+
+    std::string chatThought = brain.GenerateAppThought("general", "discord", false);
+    EXPECT(chatThought.find("Chat") != std::string::npos || chatThought.find("messages") != std::string::npos ||
+           chatThought.find("conversation") != std::string::npos,
+           "Discord app class triggers chat-specific reaction");
+
+    // 10. Test Active Window Context Reflection in Brain Update
+    WindowSurface activeWs;
+    activeWs.bounds = Rect(0, 47, 1920, 1033);
+    activeWs.title = "test_main.cpp - Antigravity IDE";
+    activeWs.appClass = "antigravity-ide";
+    singleMaximizedWorld.SetActiveWindow(activeWs);
+
+    BrainDecision activeDecision = brain.Update(0.016f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+    EXPECT(!activeDecision.thought.empty(), "Brain produces non-empty thought reflecting active window");
+}
+
 int main() {
     namespace fs = std::filesystem;
     const auto previousDirectory = fs::current_path();
@@ -400,6 +578,7 @@ int main() {
     TestMemory();
     TestCompanionLife();
     TestRegressions();
+    TestDesktopInteraction();
 
     std::cout << "\n----------------------------------------\n";
     std::cout << "Passed: " << g_testsPassed << " | Failed: " << g_testsFailed << "\n";
