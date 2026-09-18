@@ -20,6 +20,8 @@ void PetBrain::RequestAction(PetAction action, float duration) {
         m_currentThought = "Blushing happily from your warm touch ❤️";
     } else if (action == PetAction::ClimbingWindow) {
         m_climbTimer = duration;
+    } else if (action == PetAction::Daydreaming) {
+        m_currentThought = "Out of your focus for now~ daydreaming quietly by your side 💕💭";
     }
 }
 
@@ -201,24 +203,26 @@ UtilityScores PetBrain::CalculateUtilityScores(const Memory& memory,
     }
 
     // 3. Cursor Follow / Peeking at what you're doing
-    if (mouse.IsNear() && !toy.active) {
+    // If FollowingCursor action timer has expired, zero out followScore so companion can daydream or wander.
+    if (mouse.IsNear() && !toy.active && !(m_currentAction == PetAction::FollowingCursor && m_actionTimer <= 0.0f)) {
         u.followScore = (p.playfulness * 0.6f + p.sweetness * 0.5f) * (0.4f + needs.trust * 0.6f);
     } else {
         u.followScore = 0.0f;
     }
 
     // 4. Desktop Stroll / Window Exploration
-    if (watcher && watcher->IsFloorOnly()) {
-        // Floor-only mode: enhanced wandering along the screen bottom
-        u.wanderScore = p.curiosity * 0.95f * (0.5f + needs.energy * 0.5f);
+    bool hasClimbableWindows = watcher && world && watcher->HasClimbableSurfaces(*world, physics.GetHeight());
+    if (watcher && (watcher->IsFloorOnly() || !hasClimbableWindows)) {
+        // Floor stroll mode: enhanced wandering along the screen bottom
+        u.wanderScore = p.curiosity * 0.85f * (0.4f + needs.energy * 0.6f);
         u.windowScore = 0.0f;
     } else {
-        u.wanderScore = p.curiosity * 0.65f * (0.4f + needs.energy * 0.6f);
+        u.wanderScore = p.curiosity * 0.55f * (0.4f + needs.energy * 0.6f);
 
         // 5. Window Exploration Utility
         // Only seek window climb if there is at least one open window with headroom to safely climb onto!
         // Prevents endless attempts to climb off-screen on single maximized/top-docked windows.
-        if (watcher && !watcher->GetCurrentSurface() && world && watcher->HasClimbableSurfaces(*world, physics.GetHeight())) {
+        if (watcher && !watcher->GetCurrentSurface() && hasClimbableWindows) {
             u.windowScore = p.curiosity * 0.72f * (0.4f + needs.energy * 0.6f);
         } else {
             u.windowScore = 0.0f;
@@ -234,6 +238,13 @@ UtilityScores PetBrain::CalculateUtilityScores(const Memory& memory,
 
     // 7. Companion Idle (quietly sitting by your windows)
     u.idleScore = 0.25f + (p.laziness * 0.35f);
+
+    // 8. Daydreaming / Out-of-focus contemplation
+    if (!mouse.IsNear() && !toy.active && m_studyModeTimer <= 0.0f) {
+        u.daydreamScore = 0.28f + (p.curiosity * 0.22f);
+    } else {
+        u.daydreamScore = 0.0f;
+    }
 
     return u;
 }
@@ -527,19 +538,26 @@ BrainDecision PetBrain::Update(float deltaTime,
         }
     }
 
+    // 4b. Cursor Follow Transition: If FollowingCursor timer expires or cursor leaves, enter Daydreaming
+    if (m_currentAction == PetAction::FollowingCursor && (m_actionTimer <= 0.0f || !mouse.IsNear())) {
+        m_currentAction = PetAction::Daydreaming;
+        m_actionTimer = 3.5f + (rand() % 25) / 10.0f;
+        m_currentThought = "Out of your focus for now~ daydreaming quietly by your side 💕💭";
+    }
+
     // 5. Evaluate Utility Curves for autonomous behavior
     if (m_scoreTimer <= 0.0f) {
         m_lastScores = CalculateUtilityScores(memory, mouse, system, physics, watcher, &world);
         m_scoreTimer = m_tickInterval;
     }
 
-    // Study mode priority
-    if (m_studyModeTimer > 0.0f) {
+    // Study mode priority, but user toys and treats can pause or interrupt study for a fun break!
+    if (m_studyModeTimer > 0.0f && !toy.active) {
         m_currentAction = PetAction::StudyMode;
     } else {
         // Pick motivation with highest score
         float maxScore = m_lastScores.idleScore;
-        PetAction chosenAction = PetAction::Idle;
+        PetAction chosenAction = (m_studyModeTimer > 0.0f) ? PetAction::StudyMode : PetAction::Idle;
 
         if (m_lastScores.eatScore > maxScore && toy.active && toy.isTreat) {
             maxScore = m_lastScores.eatScore;
@@ -549,28 +567,39 @@ BrainDecision PetBrain::Update(float deltaTime,
             maxScore = m_lastScores.toyScore;
             chosenAction = PetAction::ChasingToy;
         }
-        if (m_lastScores.followScore > maxScore && m_lastScores.followScore > 0.35f) {
-            maxScore = m_lastScores.followScore;
-            chosenAction = PetAction::FollowingCursor;
-        }
-        if (m_lastScores.windowScore > maxScore && watcher && watcher->HasClimbableSurfaces(world, physics.GetHeight())) {
-            const WindowSurface* nearest = watcher->GetNearestSurface(petPos, world, physics.GetHeight());
-            if (nearest) {
-                maxScore = m_lastScores.windowScore;
-                chosenAction = PetAction::WalkingToWindow;
-                m_targetSurface = *nearest;
-                m_hasTargetSurface = true;
+        if (m_studyModeTimer <= 0.0f) {
+            if (m_lastScores.followScore > maxScore && m_lastScores.followScore > 0.35f) {
+                maxScore = m_lastScores.followScore;
+                chosenAction = PetAction::FollowingCursor;
             }
-        }
-        if (m_lastScores.wanderScore > maxScore && m_actionTimer <= 0.0f) {
-            maxScore = m_lastScores.wanderScore;
-            chosenAction = PetAction::Wandering;
+            if (m_lastScores.windowScore > maxScore && watcher && watcher->HasClimbableSurfaces(world, physics.GetHeight())) {
+                const WindowSurface* nearest = watcher->GetNearestSurface(petPos, world, physics.GetHeight());
+                if (nearest) {
+                    maxScore = m_lastScores.windowScore;
+                    chosenAction = PetAction::WalkingToWindow;
+                    m_targetSurface = *nearest;
+                    m_hasTargetSurface = true;
+                }
+            }
+            if (m_lastScores.wanderScore > maxScore && m_actionTimer <= 0.0f) {
+                maxScore = m_lastScores.wanderScore;
+                chosenAction = PetAction::Wandering;
+            }
+            if (m_lastScores.daydreamScore > maxScore && m_actionTimer <= 0.0f) {
+                maxScore = m_lastScores.daydreamScore;
+                chosenAction = PetAction::Daydreaming;
+            }
         }
 
         if (m_actionTimer <= 0.0f || chosenAction == PetAction::EatingTreat || chosenAction == PetAction::ChasingToy || chosenAction == PetAction::WalkingToWindow) {
             m_currentAction = chosenAction;
             if (m_currentAction == PetAction::Wandering || m_currentAction == PetAction::Idle) {
-                m_actionTimer = m_actionDuration;
+                float baseDuration = (m_actionDuration > 0.0f && m_actionDuration <= 8.0f) ? m_actionDuration : 4.0f;
+                m_actionTimer = baseDuration * (0.75f + (rand() % 50) / 100.0f);
+            } else if (m_currentAction == PetAction::FollowingCursor) {
+                m_actionTimer = 4.0f + (rand() % 25) / 10.0f;
+            } else if (m_currentAction == PetAction::Daydreaming) {
+                m_actionTimer = 3.5f + (rand() % 25) / 10.0f;
             }
         }
     }
@@ -581,6 +610,14 @@ BrainDecision PetBrain::Update(float deltaTime,
     // 6. Execute Selected Behavioral Action
     switch (m_currentAction) {
         case PetAction::StudyMode: {
+            if (m_studyModeTimer <= 0.0f) {
+                m_currentAction = PetAction::Idle;
+                m_actionTimer = 2.0f;
+                decision.animState = AnimationState::Idle;
+                decision.targetHorizontalSpeed = 0.0f;
+                m_currentThought = "Study session complete! So proud of your hard work 💕✨";
+                break;
+            }
             decision.animState = AnimationState::Idle;
             decision.targetHorizontalSpeed = 0.0f;
             memory.StudyTogether(deltaTime);
@@ -589,6 +626,13 @@ BrainDecision PetBrain::Update(float deltaTime,
         }
 
         case PetAction::EatingTreat: {
+            if (!toy.active) {
+                m_currentAction = PetAction::Idle;
+                m_actionTimer = 1.0f;
+                decision.animState = AnimationState::Idle;
+                decision.targetHorizontalSpeed = 0.0f;
+                break;
+            }
             float dx = toy.x - (petPos.x + physics.GetWidth() / 2);
             m_facingLeft = (dx < 0.0f);
             m_currentThought = "Ooh, is that coffee for me? Coming right over! ☕✨";
@@ -609,6 +653,13 @@ BrainDecision PetBrain::Update(float deltaTime,
         }
 
         case PetAction::ChasingToy: {
+            if (!toy.active) {
+                m_currentAction = PetAction::Idle;
+                m_actionTimer = 1.0f;
+                decision.animState = AnimationState::Idle;
+                decision.targetHorizontalSpeed = 0.0f;
+                break;
+            }
             float dx = toy.x - (petPos.x + physics.GetWidth() / 2);
             m_facingLeft = (dx < 0.0f);
             m_currentThought = "Tossing the plushie heart back to you! 🧸";
@@ -618,19 +669,50 @@ BrainDecision PetBrain::Update(float deltaTime,
                 decision.animState = (speed > 100.0f) ? AnimationState::Run : AnimationState::Walk;
                 decision.targetHorizontalSpeed = m_facingLeft ? -speed : speed;
             } else if (toy.y + toy.radius >= petPos.y && toy.y - toy.radius <= petPos.y + physics.GetHeight() && m_contactCooldown <= 0.0f) {
-                m_contactCooldown = 0.5f;
-                decision.animState = AnimationState::Reaction;
-                decision.targetHorizontalSpeed = 0.0f;
-                decision.wantJump = true;
-                toy.vx = m_facingLeft ? -340.0f : 340.0f;
-                toy.vy = -260.0f;
-                memory.TossPlushie(0.18f);
-                m_currentThought = "Caught the plushie heart! Hehe, playing with you is so much fun 💕";
+                m_contactCooldown = 0.6f;
+                toy.catchesRemaining--;
+
+                if (toy.catchesRemaining <= 0) {
+                    // Final catch: companion catches, hugs, and pockets the plushie heart!
+                    decision.animState = AnimationState::Reaction;
+                    decision.targetHorizontalSpeed = 0.0f;
+                    memory.TossPlushie(0.25f);
+                    physics.ClearToy();
+                    m_currentThought = "Caught it! I'll keep this plushie heart safe with me, thank you! 💕🧸";
+                    m_actionTimer = 2.5f;
+                    m_currentAction = PetAction::ReactingToClick;
+                } else {
+                    // Playful rally: bounce it back towards open screen space
+                    decision.animState = AnimationState::Reaction;
+                    decision.targetHorizontalSpeed = 0.0f;
+                    decision.wantJump = true;
+
+                    Rect workArea = world.GetPrimaryWorkArea();
+                    float centerX = static_cast<float>(workArea.x + workArea.width / 2);
+                    bool tossLeft = (toy.x > centerX) || (toy.x > static_cast<float>(workArea.x + workArea.width - 250));
+                    if (toy.x < static_cast<float>(workArea.x + 250)) {
+                        tossLeft = false;
+                    }
+
+                    toy.vx = tossLeft ? -300.0f : 300.0f;
+                    toy.vy = -260.0f;
+                    memory.TossPlushie(0.12f);
+                    m_currentThought = "Caught the plushie heart! Bouncing it back to you, catch! 🧸✨";
+                }
             }
             break;
         }
 
         case PetAction::FollowingCursor: {
+            if (m_actionTimer <= 0.0f || !mouse.IsNear()) {
+                m_currentAction = PetAction::Daydreaming;
+                m_actionTimer = 3.5f + (rand() % 25) / 10.0f;
+                decision.action = PetAction::Daydreaming;
+                decision.animState = AnimationState::LookAround;
+                decision.targetHorizontalSpeed = 0.0f;
+                m_currentThought = "Out of your focus for now~ daydreaming quietly by your side 💕💭";
+                break;
+            }
             float dx = static_cast<float>(cursor.x - (petPos.x + physics.GetWidth() / 2));
             m_currentThought = "Watching your cursor dance around... you look so cool when you code!";
             if (std::abs(dx) > 25.0f) {
@@ -639,8 +721,36 @@ BrainDecision PetBrain::Update(float deltaTime,
                 decision.animState = (speed > 100.0f) ? AnimationState::Run : AnimationState::Walk;
                 decision.targetHorizontalSpeed = m_facingLeft ? -speed : speed;
             } else {
-                decision.animState = AnimationState::Idle;
+                decision.animState = AnimationState::LookAround;
                 decision.targetHorizontalSpeed = 0.0f;
+                m_currentThought = "Peeking right at what you're doing... fascinating!";
+            }
+            break;
+        }
+
+        case PetAction::Daydreaming: {
+            if (m_actionTimer <= 0.0f) {
+                m_currentAction = PetAction::Wandering;
+                float baseDuration = (m_actionDuration > 0.0f && m_actionDuration <= 8.0f) ? m_actionDuration : 4.0f;
+                m_actionTimer = baseDuration * (0.75f + (rand() % 50) / 100.0f);
+                decision.action = PetAction::Wandering;
+                decision.animState = AnimationState::Walk;
+                decision.targetHorizontalSpeed = m_facingLeft ? -60.0f : 60.0f;
+                m_currentThought = "Taking a little stroll around your desktop~ 🐾";
+                break;
+            }
+            decision.animState = AnimationState::LookAround;
+            decision.targetHorizontalSpeed = 0.0f;
+            if (m_thoughtTimer >= 4.0f) {
+                m_thoughtTimer = 0.0f;
+                static const std::string daydreamThoughts[] = {
+                    "Out of your focus for now~ daydreaming about little stars and warm tea ✨🍵",
+                    "You're in the zone! I'll daydream quietly so I don't distract you 💕💭",
+                    "Daydreaming while you focus... you're working so hard today! 🌸",
+                    "Lost in my thoughts for a moment... watching the desktop clouds drift by ☁️",
+                    "Doing my own little daydreams while you conquer your tasks! 🐾✨"
+                };
+                m_currentThought = daydreamThoughts[(++m_thoughtCycle) % 5];
             }
             break;
         }

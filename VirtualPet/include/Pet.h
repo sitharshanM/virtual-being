@@ -49,6 +49,8 @@ public:
     void SendCoffee(float amount = 0.35f);
     void TossPlushieHeart();
     void StartStudyMode(float duration = 120.0f);
+    void StopStudyMode();
+    void ToggleStudyMode(float duration = 120.0f);
 
     // Legacy / Convenience wrappers
     void Feed(float amount = 0.35f) { SendCoffee(amount); }
@@ -68,6 +70,7 @@ public:
     void OnMouseMove(const Point& screenPos);
     void OnRButtonDown(const Point& screenPos);
     void OnRButtonUp(const Point& screenPos);
+    void OnMouseLeave() noexcept;
 
     void SetMenuOpen(bool open) noexcept;
     [[nodiscard]] bool IsMenuOpen() const noexcept { return m_brain.IsMenuOpen(); }

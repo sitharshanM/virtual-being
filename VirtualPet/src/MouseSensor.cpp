@@ -73,6 +73,19 @@ void MouseSensor::CancelInteraction() noexcept {
     ResetFrameState();
 }
 
+void MouseSensor::OnMouseLeave() noexcept {
+    m_state.isNear = false;
+    m_state.isHovering = false;
+    m_state.distanceToPet = 99999.0f;
+    m_state.screenPosition = Point(-9999, -9999);
+    m_state.petRelativePosition = Point(-9999, -9999);
+    m_lastPolledPosition = m_state.screenPosition;
+    if (!m_state.isDragging) {
+        m_trackingClick = false;
+        m_state.leftButtonDown = false;
+    }
+}
+
 void MouseSensor::Update(float deltaTime, const Rect& petBounds) {
     (void)deltaTime;
 
@@ -166,10 +179,17 @@ void MouseSensor::OnMouseMove(const Point& screenPos, const Rect& petBounds) {
     m_state.petRelativePosition.x = screenPos.x - petBounds.x;
     m_state.petRelativePosition.y = screenPos.y - petBounds.y;
 
+    const Point center = petBounds.Center();
+    const float dx = static_cast<float>(screenPos.x - center.x);
+    const float dy = static_cast<float>(screenPos.y - center.y);
+    m_state.distanceToPet = std::hypot(dx, dy);
+    m_state.isHovering = petBounds.Contains(screenPos);
+    m_state.isNear = (m_state.distanceToPet <= m_config.proximityDistancePx);
+
     if (m_trackingClick && !m_state.isDragging && m_config.detectCursorDrag) {
-        const float dx = static_cast<float>(screenPos.x - m_clickStartPos.x);
-        const float dy = static_cast<float>(screenPos.y - m_clickStartPos.y);
-        if (std::hypot(dx, dy) >= m_config.dragThresholdPx) {
+        const float dragDx = static_cast<float>(screenPos.x - m_clickStartPos.x);
+        const float dragDy = static_cast<float>(screenPos.y - m_clickStartPos.y);
+        if (std::hypot(dragDx, dragDy) >= m_config.dragThresholdPx) {
             m_state.isDragging = true;
         }
     }

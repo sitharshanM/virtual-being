@@ -288,8 +288,8 @@ bool Animation::RenderCairo(cairo_t* cr, int32_t destX, int32_t destY, int32_t d
 
     // Body / Head (Cute rounded chibi form)
     cairo_save(cr);
-    cairo_translate(cr, destX + drawW * 0.5, destY + drawH * 0.58);
-    cairo_scale(cr, drawW * 0.40, drawH * 0.36);
+    cairo_translate(cr, destX + drawW * 0.5, destY + drawH * 0.60);
+    cairo_scale(cr, drawW * 0.40, drawH * 0.39);
     cairo_arc(cr, 0, 0, 1.0, 0, 2 * M_PI);
     cairo_set_source_rgb(cr, 1.0, 0.68, 0.36);
     cairo_fill_preserve(cr);
@@ -300,8 +300,8 @@ bool Animation::RenderCairo(cairo_t* cr, int32_t destX, int32_t destY, int32_t d
 
     // Belly patch (Creamy warm white)
     cairo_save(cr);
-    cairo_translate(cr, destX + drawW * 0.5, destY + drawH * 0.66);
-    cairo_scale(cr, drawW * 0.24, drawH * 0.22);
+    cairo_translate(cr, destX + drawW * 0.5, destY + drawH * 0.69);
+    cairo_scale(cr, drawW * 0.25, drawH * 0.26);
     cairo_arc(cr, 0, 0, 1.0, 0, 2 * M_PI);
     cairo_set_source_rgb(cr, 1.0, 0.96, 0.90);
     cairo_fill(cr);
@@ -372,8 +372,8 @@ bool Animation::RenderCairo(cairo_t* cr, int32_t destX, int32_t destY, int32_t d
     cairo_set_source_rgb(cr, 1.0, 0.96, 0.92);
     // Left paw
     cairo_save(cr);
-    cairo_translate(cr, destX + drawW * 0.38, destY + drawH * 0.88);
-    cairo_scale(cr, drawW * 0.08, drawH * 0.06);
+    cairo_translate(cr, destX + drawW * 0.38, destY + drawH * 0.93);
+    cairo_scale(cr, drawW * 0.08, drawH * 0.07);
     cairo_arc(cr, 0, 0, 1.0, 0, 2 * M_PI);
     cairo_fill_preserve(cr);
     cairo_set_source_rgb(cr, 0.78, 0.45, 0.18);
@@ -383,8 +383,8 @@ bool Animation::RenderCairo(cairo_t* cr, int32_t destX, int32_t destY, int32_t d
 
     // Right paw
     cairo_save(cr);
-    cairo_translate(cr, destX + drawW * 0.62, destY + drawH * 0.88);
-    cairo_scale(cr, drawW * 0.08, drawH * 0.06);
+    cairo_translate(cr, destX + drawW * 0.62, destY + drawH * 0.93);
+    cairo_scale(cr, drawW * 0.08, drawH * 0.07);
     cairo_arc(cr, 0, 0, 1.0, 0, 2 * M_PI);
     cairo_fill_preserve(cr);
     cairo_set_source_rgb(cr, 0.78, 0.45, 0.18);

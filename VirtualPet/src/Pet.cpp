@@ -326,7 +326,17 @@ void Pet::SendCoffee(float amount) {
 
 void Pet::TossPlushieHeart() {
     Point petPos = m_physics.GetPosition();
-    float throwVx = m_animation.IsFacingLeft() ? -270.0f : 270.0f;
+    Rect workArea = m_desktopWorld.GetPrimaryWorkArea();
+    float throwVx = 270.0f;
+    if (petPos.x > workArea.x + workArea.width - 250) {
+        throwVx = -270.0f;
+        m_animation.SetFacingLeft(true);
+    } else if (petPos.x < workArea.x + 250) {
+        throwVx = 270.0f;
+        m_animation.SetFacingLeft(false);
+    } else {
+        throwVx = m_animation.IsFacingLeft() ? -270.0f : 270.0f;
+    }
     m_physics.SpawnToy(static_cast<float>(petPos.x + m_physics.GetWidth() / 2),
                        static_cast<float>(petPos.y - 30),
                        throwVx, -240.0f, false);
@@ -339,9 +349,32 @@ void Pet::StartStudyMode(float duration) {
     // transitions to StudyMode in the next UpdateStep call.
 }
 
+void Pet::StopStudyMode() {
+    m_brain.StopStudyMode();
+    m_studyAnimActive = false;
+}
+
+void Pet::ToggleStudyMode(float duration) {
+    if (m_brain.IsInStudyMode()) {
+        StopStudyMode();
+    } else {
+        StartStudyMode(duration);
+    }
+}
+
 void Pet::DropToy(bool isTreat) {
     Point petPos = m_physics.GetPosition();
-    float throwVx = m_animation.IsFacingLeft() ? -260.0f : 260.0f;
+    Rect workArea = m_desktopWorld.GetPrimaryWorkArea();
+    float throwVx = 260.0f;
+    if (petPos.x > workArea.x + workArea.width - 250) {
+        throwVx = -260.0f;
+        m_animation.SetFacingLeft(true);
+    } else if (petPos.x < workArea.x + 250) {
+        throwVx = 260.0f;
+        m_animation.SetFacingLeft(false);
+    } else {
+        throwVx = m_animation.IsFacingLeft() ? -260.0f : 260.0f;
+    }
     m_physics.SpawnToy(static_cast<float>(petPos.x + m_physics.GetWidth() / 2),
                        static_cast<float>(petPos.y - 30),
                        throwVx, -220.0f, isTreat);
@@ -366,6 +399,10 @@ void Pet::OnRButtonDown(const Point& screenPos) {
 
 void Pet::OnRButtonUp(const Point& screenPos) {
     m_mouseSensor.OnButtonUp(false, screenPos);
+}
+
+void Pet::OnMouseLeave() noexcept {
+    m_mouseSensor.OnMouseLeave();
 }
 
 void Pet::SetMenuOpen(bool open) noexcept {

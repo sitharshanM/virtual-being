@@ -243,7 +243,8 @@ void ShowPetContextMenu(HWND hwnd, POINT pt) {
     ::AppendMenuW(hMenu, MF_STRING, ID_MENU_HEADPAT, L"&Give Headpat ❤️");
     ::AppendMenuW(hMenu, MF_STRING, ID_MENU_FEED, L"Send &Coffee / Boba Break ☕");
     ::AppendMenuW(hMenu, MF_STRING, ID_MENU_DROP_TOY, L"Toss &Plushie Heart 🧸");
-    ::AppendMenuW(hMenu, MF_STRING, ID_MENU_STUDY, L"&Study Together (Focus Mode) 📖");
+    bool inStudy = g_pet && g_pet->GetBrain().IsInStudyMode();
+    ::AppendMenuW(hMenu, MF_STRING, ID_MENU_STUDY, inStudy ? L"&Take a Study Break (End Focus) ☕" : L"&Study Together (Focus Mode) 📖");
     ::AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
 
     bool autostart = VirtualPet::SaveManager::IsStartWithWindowsEnabled();
@@ -440,7 +441,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     if (g_pet) g_pet->TossPlushieHeart();
                     break;
                 case ID_MENU_STUDY:
-                    if (g_pet) g_pet->StartStudyMode();
+                    if (g_pet) g_pet->ToggleStudyMode();
                     break;
                 case ID_MENU_AUTOSTART: {
                     bool current = VirtualPet::SaveManager::IsStartWithWindowsEnabled();

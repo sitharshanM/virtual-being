@@ -265,6 +265,9 @@ void TestRegressions() {
 
         pet.StartStudyMode(60.0f);
         EXPECT(pet.GetBrain().IsInStudyMode(), "Study mode activates successfully");
+        pet.ToggleStudyMode();
+        EXPECT(!pet.GetBrain().IsInStudyMode(), "ToggleStudyMode deactivates study mode successfully");
+        pet.StartStudyMode(60.0f);
 
         pet.TossPlushieHeart();
         EXPECT(pet.GetPhysics().GetToy().active && !pet.GetPhysics().GetToy().isTreat, "Plushie heart spawned in physics world");
@@ -523,6 +526,7 @@ void TestDesktopInteraction() {
     // Utility scores must not attempt climb (windowScore == 0) on single maximized screen
     UtilityScores scores = brain.CalculateUtilityScores(memory, mouse, system, physics, &headroomWatcher, &singleMaximizedWorld);
     EXPECT(scores.windowScore == 0.0f, "Pet utility engine gives 0 windowScore when no climbable windows exist");
+    EXPECT(scores.wanderScore > scores.idleScore, "Floor wanderScore exceeds idleScore so companion does not freeze indefinitely on single maximized screen");
 
     // 9. Test Dynamic Contextual Thought Generation & Active App Awareness
     std::string kittyThought1 = brain.GenerateAppThought("~", "kitty", false);
@@ -609,6 +613,123 @@ void TestDesktopInteraction() {
     EXPECT(brain.IsMenuOpen() == false, "Brain records menu closed state");
     BrainDecision postMenuDecision = brain.Update(0.016f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
     EXPECT(postMenuDecision.action != PetAction::Dragged, "Pet operates normally after menu closes");
+
+    // 13. Test Plushie Heart Play, Anti-Corner Toss, and Final Pocketing
+    int playGroundY = singleMaximizedWorld.GetGroundY(200, physics.GetHeight(), 0);
+    float petY = static_cast<float>(playGroundY);
+    float petX = 200.0f;
+    physics.SetPosition(petX, petY);
+    // Spawn toy right in contact range of the companion
+    float toyX = petX + physics.GetWidth() / 2.0f;
+    float toyY = petY + physics.GetHeight() / 2.0f;
+    physics.SpawnToy(toyX, toyY, 0.0f, 0.0f, false);
+    brain.RequestAction(PetAction::ChasingToy, 5.0f);
+    EXPECT(physics.GetToy().active, "Plushie heart starts active");
+    EXPECT(physics.GetToy().catchesRemaining == 2, "Plushie heart initializes with 2 catches");
+
+    // 1st catch: rally bounce
+    BrainDecision catch1 = brain.Update(0.016f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+    EXPECT(physics.GetToy().active, "Toy remains active after first rally");
+    EXPECT(physics.GetToy().catchesRemaining == 1, "First catch decrements catchesRemaining to 1");
+    EXPECT(physics.GetToy().vx != 0.0f, "Toy bounced back towards open screen space");
+
+    // Fast-forward contact cooldown while pet moves
+    physics.SetPosition(0.0f, 0.0f);
+    brain.Update(0.7f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+
+    // Position pet at toy for 2nd (final) catch
+    physics.SetPosition(physics.GetToy().x - physics.GetWidth() / 2.0f, physics.GetToy().y - physics.GetHeight() / 2.0f);
+    brain.RequestAction(PetAction::ChasingToy, 5.0f);
+    BrainDecision catch2 = brain.Update(0.016f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+    EXPECT(!physics.GetToy().active, "Companion hugs and pockets the plushie heart on final catch");
+    EXPECT(catch2.animState == AnimationState::Reaction, "Companion shows heart reaction when collecting plushie");
+
+    // Test Toy Lifetime Auto-Despawn Safety
+    physics.SpawnToy(500.0f, 500.0f, 0.0f, 0.0f, false);
+    EXPECT(physics.GetToy().active, "Toy spawned for timeout test");
+    physics.GetToy().lifetime = 20.5f;
+    physics.Update(0.016f, singleMaximizedWorld);
+    EXPECT(!physics.GetToy().active, "Toy automatically despawns after 20s lifetime to avoid clutter or stuck items");
+
+    // 14. Test Study Mode Toggle and Toy Interaction Break
+    brain.StartStudyMode(60.0f);
+    EXPECT(brain.IsInStudyMode(), "Study mode starts");
+    
+    // While in study mode, tossing a plushie heart allows taking a break to play
+    physics.SpawnToy(300.0f, static_cast<float>(singleMaximizedWorld.GetGroundY(300, physics.GetHeight(), 0)), 0.0f, 0.0f, false);
+    BrainDecision studyToyDecision = brain.Update(0.016f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+    EXPECT(studyToyDecision.action == PetAction::ChasingToy, "Companion takes a break to chase toy during study mode");
+
+    // Clear toy and verify study mode resumes
+    physics.ClearToy();
+    BrainDecision resumeStudyDecision = brain.Update(0.016f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+    EXPECT(resumeStudyDecision.action == PetAction::StudyMode, "Companion resumes study mode once toy is cleared");
+
+    // Test toggling study mode off
+    brain.ToggleStudyMode();
+    EXPECT(!brain.IsInStudyMode(), "ToggleStudyMode exits study mode immediately");
+    BrainDecision postStudyDecision = brain.Update(0.016f, mouse, system, memory, singleMaximizedWorld, physics, &headroomWatcher);
+    EXPECT(postStudyDecision.action != PetAction::StudyMode, "Companion returns to normal behavior after exiting study mode");
+}
+
+void TestCursorFocusAndDaydreaming() {
+    std::cout << "Running TestCursorFocusAndDaydreaming...\n";
+    MouseSensor mouse;
+    Rect petBounds(100, 100, 120, 120);
+
+    // 1. Test MouseSensor OnMouseMove vs OnMouseLeave
+    mouse.OnMouseMove(Point(120, 120), petBounds);
+    EXPECT(mouse.IsHovering(), "Mouse hovering over pet bounds");
+    EXPECT(mouse.IsNear(), "Mouse is near pet");
+
+    mouse.OnMouseLeave();
+    EXPECT(!mouse.IsHovering(), "Mouse is not hovering after OnMouseLeave");
+    EXPECT(!mouse.IsNear(), "Mouse is not near after OnMouseLeave");
+    EXPECT(mouse.GetDistanceToPet() > 1000.0f, "Distance to pet is out of range after OnMouseLeave");
+
+    // 2. Test PetBrain FollowingCursor timeout into Daydreaming
+    PetBrain brain;
+    SystemSensor system;
+    Memory memory;
+    DesktopWorld world(Rect(0, 0, 1920, 1080), {});
+    Physics physics;
+    physics.SetPosition(500.0f, 960.0f);
+    physics.SetDimensions(120, 120);
+    DesktopWatcher watcher;
+
+    // Move mouse near companion to trigger cursor following
+    mouse.OnMouseMove(Point(520, 960), physics.GetBounds());
+    brain.RequestAction(PetAction::FollowingCursor, 1.0f);
+    BrainDecision followDecision = brain.Update(0.016f, mouse, system, memory, world, physics, &watcher);
+    EXPECT(followDecision.action == PetAction::FollowingCursor, "Companion starts in FollowingCursor action");
+
+    // Advance time past the 1.0s action timer
+    BrainDecision daydreamDecision = brain.Update(1.2f, mouse, system, memory, world, physics, &watcher);
+    EXPECT(daydreamDecision.action == PetAction::Daydreaming,
+           "Companion transitions to Daydreaming when FollowingCursor action expires");
+    EXPECT(daydreamDecision.animState == AnimationState::LookAround,
+           "Daydreaming companion observes surroundings with LookAround animation");
+    EXPECT(daydreamDecision.targetHorizontalSpeed == 0.0f,
+           "Daydreaming companion rests in place without freezing");
+    EXPECT(daydreamDecision.thought.find("focus") != std::string::npos ||
+           daydreamDecision.thought.find("daydream") != std::string::npos,
+           "Companion thought reflects being out of focus / daydreaming");
+
+    // Advance time past Daydreaming duration (e.g. 5.0s)
+    BrainDecision resumeWanderDecision = brain.Update(5.0f, mouse, system, memory, world, physics, &watcher);
+    EXPECT(resumeWanderDecision.action == PetAction::Wandering,
+           "Companion seamlessly transitions from Daydreaming into Wandering");
+    EXPECT(resumeWanderDecision.animState == AnimationState::Walk,
+           "Companion begins walking when wandering resumes");
+    EXPECT(resumeWanderDecision.targetHorizontalSpeed != 0.0f,
+           "Companion moves horizontally when wandering resumes");
+
+    // 3. Test Mouse leaving window while FollowingCursor immediately enters Daydreaming
+    brain.RequestAction(PetAction::FollowingCursor, 5.0f);
+    mouse.OnMouseLeave();
+    BrainDecision immediateDaydream = brain.Update(0.016f, mouse, system, memory, world, physics, &watcher);
+    EXPECT(immediateDaydream.action == PetAction::Daydreaming,
+           "Companion immediately transitions to Daydreaming when cursor leaves window");
 }
 
 int main() {
@@ -628,6 +749,7 @@ int main() {
     TestCompanionLife();
     TestRegressions();
     TestDesktopInteraction();
+    TestCursorFocusAndDaydreaming();
 
     std::cout << "\n----------------------------------------\n";
     std::cout << "Passed: " << g_testsPassed << " | Failed: " << g_testsFailed << "\n";

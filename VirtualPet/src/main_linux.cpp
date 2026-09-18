@@ -328,6 +328,20 @@ gboolean OnPetMotion(GtkWidget* /*widget*/, GdkEventMotion* event, gpointer /*da
     return FALSE;
 }
 
+gboolean OnPetLeave(GtkWidget* /*widget*/, GdkEventCrossing* event, gpointer /*data*/) {
+    if (g_pet && event && event->detail != GDK_NOTIFY_INFERIOR) {
+        g_pet->OnMouseLeave();
+    }
+    return FALSE;
+}
+
+gboolean OnPetFocusOut(GtkWidget* /*widget*/, GdkEventFocus* /*event*/, gpointer /*data*/) {
+    if (g_pet) {
+        g_pet->OnMouseLeave();
+    }
+    return FALSE;
+}
+
 // ── Context Menu Callbacks ──────────────────────────────────────────────────
 void OnMenuToggleVisible(GtkMenuItem* /*item*/, gpointer /*data*/) {
     g_isPetVisible = !g_isPetVisible;
@@ -357,7 +371,7 @@ void OnMenuToy(GtkMenuItem* /*item*/, gpointer /*data*/) {
 }
 
 void OnMenuStudy(GtkMenuItem* /*item*/, gpointer /*data*/) {
-    if (g_pet) g_pet->StartStudyMode();
+    if (g_pet) g_pet->ToggleStudyMode();
 }
 
 void OnMenuChat(GtkMenuItem* /*item*/, gpointer /*data*/) {
@@ -402,7 +416,8 @@ void ShowPetContextMenu(GdkEventButton* event) {
     g_signal_connect(itemToy, "activate", G_CALLBACK(OnMenuToy), nullptr);
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), itemToy);
 
-    GtkWidget* itemStudy = gtk_menu_item_new_with_label("Study Together (Focus Mode) 📖");
+    bool inStudy = g_pet && g_pet->GetBrain().IsInStudyMode();
+    GtkWidget* itemStudy = gtk_menu_item_new_with_label(inStudy ? "Take a Study Break (End Focus) ☕" : "Study Together (Focus Mode) 📖");
     g_signal_connect(itemStudy, "activate", G_CALLBACK(OnMenuStudy), nullptr);
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), itemStudy);
 
@@ -762,11 +777,16 @@ int main(int argc, char* argv[]) {
     gtk_widget_add_events(g_petWindow,
                           GDK_BUTTON_PRESS_MASK |
                           GDK_BUTTON_RELEASE_MASK |
-                          GDK_POINTER_MOTION_MASK);
+                          GDK_POINTER_MOTION_MASK |
+                          GDK_LEAVE_NOTIFY_MASK |
+                          GDK_ENTER_NOTIFY_MASK |
+                          GDK_FOCUS_CHANGE_MASK);
     gtk_widget_add_events(g_petArea,
                           GDK_BUTTON_PRESS_MASK |
                           GDK_BUTTON_RELEASE_MASK |
-                          GDK_POINTER_MOTION_MASK);
+                          GDK_POINTER_MOTION_MASK |
+                          GDK_LEAVE_NOTIFY_MASK |
+                          GDK_ENTER_NOTIFY_MASK);
 
     g_signal_connect(g_petArea, "draw", G_CALLBACK(OnPetDraw), nullptr);
     g_signal_connect(g_petWindow, "button-press-event", G_CALLBACK(OnPetButtonPress), nullptr);
@@ -775,6 +795,9 @@ int main(int argc, char* argv[]) {
     g_signal_connect(g_petArea, "button-release-event", G_CALLBACK(OnPetButtonRelease), nullptr);
     g_signal_connect(g_petWindow, "motion-notify-event", G_CALLBACK(OnPetMotion), nullptr);
     g_signal_connect(g_petArea, "motion-notify-event", G_CALLBACK(OnPetMotion), nullptr);
+    g_signal_connect(g_petWindow, "leave-notify-event", G_CALLBACK(OnPetLeave), nullptr);
+    g_signal_connect(g_petArea, "leave-notify-event", G_CALLBACK(OnPetLeave), nullptr);
+    g_signal_connect(g_petWindow, "focus-out-event", G_CALLBACK(OnPetFocusOut), nullptr);
 
     // 3. Create Toy Window (Transparent, overlay)
     g_toyWindow = gtk_window_new(GTK_WINDOW_TOPLEVEL);

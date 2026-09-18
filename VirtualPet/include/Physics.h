@@ -7,7 +7,7 @@ namespace VirtualPet {
 /// Configuration constants for 2D desktop physics simulation.
 struct PhysicsConfig {
     float gravity{980.0f};          ///< Downward gravitational acceleration (px/s^2).
-    int32_t groundMargin{10};       ///< Distance in pixels above taskbar/bottom edge.
+    int32_t groundMargin{0};        ///< Distance in pixels above taskbar/bottom edge.
     float edgeBounce{0.25f};        ///< Restitution coefficient on boundary collision.
     float dragSmoothing{0.25f};     ///< Lerp interpolation factor for dragging responsiveness.
     float groundFriction{0.88f};    ///< Friction multiplier applied to horizontal speed when on ground.
@@ -24,6 +24,8 @@ struct ToyItem {
     int32_t radius{12};
     bool active{false};
     bool isTreat{false};
+    float lifetime{0.0f};          ///< Elapsed time in seconds since spawned.
+    int32_t catchesRemaining{2};   ///< Rallies remaining before companion keeps and pockets the toy.
 };
 
 /**

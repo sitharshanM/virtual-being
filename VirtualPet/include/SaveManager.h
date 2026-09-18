@@ -22,12 +22,12 @@ struct AppConfigData {
     std::string initialPosition{"tray_bottom_right"};
 
     float gravity{980.0f};
-    int32_t groundMargin{10};
+    int32_t groundMargin{0};
     float edgeBounce{0.2f};
     float dragSmoothing{0.15f};
 
     float tickRateHz{10.0f};
-    float idleTimeoutSeconds{30.0f};
+    float idleTimeoutSeconds{4.0f};
     float energyDepletionRate{0.005f};
     float hungerIncreaseRate{0.008f};
 
