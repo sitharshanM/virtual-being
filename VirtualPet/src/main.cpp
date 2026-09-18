@@ -376,10 +376,19 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             ShowChatPanel(); return 0;
 
         case WM_MOUSEMOVE: {
+            TRACKMOUSEEVENT tme{ sizeof(TRACKMOUSEEVENT), TME_LEAVE, hwnd, 0 };
+            ::TrackMouseEvent(&tme);
             POINT pt{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
             ::ClientToScreen(hwnd, &pt);
             if (g_pet) {
                 g_pet->OnMouseMove(VirtualPet::Point(pt.x, pt.y));
+            }
+            return 0;
+        }
+
+        case WM_MOUSELEAVE: {
+            if (g_pet) {
+                g_pet->OnMouseLeave();
             }
             return 0;
         }
