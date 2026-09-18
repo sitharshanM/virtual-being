@@ -120,6 +120,7 @@ GtkStatusIcon* g_statusIcon = nullptr;
 
 bool g_isPetVisible = true;
 std::string g_bubbleText;
+static double g_bubbleTailX = 150.0;
 
 using Clock = std::chrono::steady_clock;
 auto g_prevTime = Clock::now();
@@ -194,25 +195,41 @@ gboolean OnBubbleDraw(GtkWidget* widget, cairo_t* cr, gpointer /*data*/) {
 
     int width = gtk_widget_get_allocated_width(widget);
     int height = gtk_widget_get_allocated_height(widget);
+    if (width <= 0) width = 300;
+    if (height <= 0) height = 92;
 
-    // Bubble body
-    cairo_set_source_rgb(cr, 1.0, 0.976, 0.988); // Soft warm pinkish white
-    DrawRoundedRect(cr, 3, 3, width - 6, height - 16, 16);
-    cairo_fill_preserve(cr);
+    double x = 4.0;
+    double y = 4.0;
+    double w = width - 8.0;
+    double h = height - 18.0;
+    double r = 16.0;
 
-    // Outline
-    cairo_set_source_rgb(cr, 0.45, 0.28, 0.35); // Border
-    cairo_set_line_width(cr, 2.0);
-    cairo_stroke(cr);
+    double tailX = std::clamp(g_bubbleTailX, 40.0, width - 40.0);
+    double tailW = 18.0;
+    double tailH = 12.0;
 
-    // Tail pointing down to companion
-    cairo_set_source_rgb(cr, 1.0, 0.976, 0.988);
-    cairo_move_to(cr, width - 55, height - 16);
-    cairo_line_to(cr, width - 30, height - 2);
-    cairo_line_to(cr, width - 35, height - 16);
+    // Unified continuous outline for bubble body and centered tail
+    cairo_new_sub_path(cr);
+    cairo_arc(cr, x + r, y + r, r, M_PI, 1.5 * M_PI);
+    cairo_arc(cr, x + w - r, y + r, r, -0.5 * M_PI, 0);
+    cairo_arc(cr, x + w - r, y + h - r, r, 0, 0.5 * M_PI);
+
+    double tailLeft = tailX - tailW / 2.0;
+    double tailRight = tailX + tailW / 2.0;
+    cairo_line_to(cr, tailRight, y + h);
+    cairo_line_to(cr, tailX, y + h + tailH);
+    cairo_line_to(cr, tailLeft, y + h);
+
+    cairo_arc(cr, x + r, y + h - r, r, 0.5 * M_PI, M_PI);
     cairo_close_path(cr);
+
+    // Soft warm creamy pinkish-white fill
+    cairo_set_source_rgb(cr, 1.0, 0.98, 0.99);
     cairo_fill_preserve(cr);
-    cairo_set_source_rgb(cr, 0.45, 0.28, 0.35);
+
+    // Clean aesthetic border
+    cairo_set_source_rgb(cr, 0.42, 0.26, 0.32);
+    cairo_set_line_width(cr, 2.0);
     cairo_stroke(cr);
 
     // Text rendering via Pango
@@ -263,14 +280,15 @@ gboolean OnPetButtonPress(GtkWidget* /*widget*/, GdkEventButton* event, gpointer
     if (!g_pet) return FALSE;
 
     VirtualPet::Point petPos = g_pet->GetPosition();
-    int screenX = (event->x_root != 0.0) ? static_cast<int>(event->x_root) : (petPos.x + static_cast<int>(event->x));
-    int screenY = (event->y_root != 0.0) ? static_cast<int>(event->y_root) : (petPos.y + static_cast<int>(event->y));
+    int screenX = petPos.x + static_cast<int>(event->x);
+    int screenY = petPos.y + static_cast<int>(event->y);
 
     if (event->button == 1) {
         if (event->type == GDK_2BUTTON_PRESS) {
             ShowChatPanel();
             return TRUE;
         }
+        if (g_petWindow) gtk_grab_add(g_petWindow);
         g_pet->OnLButtonDown(VirtualPet::Point(screenX, screenY));
         return TRUE;
     } else if (event->button == 3) {
@@ -284,10 +302,11 @@ gboolean OnPetButtonRelease(GtkWidget* /*widget*/, GdkEventButton* event, gpoint
     if (!g_pet) return FALSE;
 
     VirtualPet::Point petPos = g_pet->GetPosition();
-    int screenX = (event->x_root != 0.0) ? static_cast<int>(event->x_root) : (petPos.x + static_cast<int>(event->x));
-    int screenY = (event->y_root != 0.0) ? static_cast<int>(event->y_root) : (petPos.y + static_cast<int>(event->y));
+    int screenX = petPos.x + static_cast<int>(event->x);
+    int screenY = petPos.y + static_cast<int>(event->y);
 
     if (event->button == 1) {
+        if (g_petWindow) gtk_grab_remove(g_petWindow);
         g_pet->OnLButtonUp(VirtualPet::Point(screenX, screenY));
         return TRUE;
     } else if (event->button == 3) {
@@ -300,8 +319,8 @@ gboolean OnPetButtonRelease(GtkWidget* /*widget*/, GdkEventButton* event, gpoint
 gboolean OnPetMotion(GtkWidget* /*widget*/, GdkEventMotion* event, gpointer /*data*/) {
     if (g_pet) {
         VirtualPet::Point petPos = g_pet->GetPosition();
-        int screenX = (event->x_root != 0.0) ? static_cast<int>(event->x_root) : (petPos.x + static_cast<int>(event->x));
-        int screenY = (event->y_root != 0.0) ? static_cast<int>(event->y_root) : (petPos.y + static_cast<int>(event->y));
+        int screenX = petPos.x + static_cast<int>(event->x);
+        int screenY = petPos.y + static_cast<int>(event->y);
         g_pet->OnMouseMove(VirtualPet::Point(screenX, screenY));
         return TRUE;
     }
@@ -646,8 +665,13 @@ gboolean SimulationTick(gpointer /*data*/) {
             if (g_bubbleArea) gtk_widget_queue_draw(g_bubbleArea);
         }
         if (g_isPetVisible && !g_bubbleText.empty()) {
-            int bubbleX = pos.x + width / 2 - 260;
-            int bubbleY = (pos.y >= 96) ? pos.y - 88 : pos.y + 8;
+            int bubbleW = 300;
+            int bubbleH = 92;
+            int bubbleX = pos.x + (width - bubbleW) / 2;
+            int bubbleY = (pos.y >= 96) ? pos.y - 88 : pos.y + height + 6;
+
+            g_bubbleTailX = (pos.x + width / 2.0) - bubbleX;
+
             LayerShell::Move(g_bubbleWindow, bubbleX, bubbleY);
             if (!gtk_widget_get_visible(g_bubbleWindow)) {
                 gtk_widget_show_all(g_bubbleWindow);

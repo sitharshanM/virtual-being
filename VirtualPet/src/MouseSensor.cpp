@@ -28,6 +28,13 @@ void MouseSensor::PollOSCursor() {
     m_state.leftButtonDown = (::GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
     m_state.rightButtonDown = (::GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
 #else
+    const char* wayland = std::getenv("WAYLAND_DISPLAY");
+    if (wayland && *wayland) {
+        // Under Wayland, global cursor polling without an active pointer grab is prohibited.
+        // Pointer position and click/drag states are driven via GDK window events
+        // (OnButtonDown, OnMouseMove, OnButtonUp).
+        return;
+    }
     GdkDisplay* disp = gdk_display_get_default();
     if (disp) {
         GdkSeat* seat = gdk_display_get_default_seat(disp);

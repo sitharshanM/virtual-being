@@ -280,6 +280,16 @@ void TestRegressions() {
     mouse.ResetFrameState();
     EXPECT(!mouse.WasLeftButtonClicked(), "Consumed click clears");
 
+    // Dragging tests
+    MouseSensor dragMouse;
+    dragMouse.OnButtonDown(true, Point(20, 20), Rect(0, 0, 100, 100));
+    dragMouse.OnMouseMove(Point(50, 50), Rect(0, 0, 100, 100));
+    EXPECT(dragMouse.IsDragging(), "Drag state triggers after movement exceeds threshold");
+    EXPECT(!dragMouse.WasLeftButtonClicked(), "Drag does not falsely trigger click");
+    dragMouse.OnButtonUp(true, Point(50, 50));
+    EXPECT(!dragMouse.IsDragging(), "Releasing mouse button ends drag");
+    EXPECT(!dragMouse.WasLeftButtonClicked(), "Release after dragging does not trigger click");
+
     DesktopWorld world;
     SystemSensor system;
     Physics physics;
